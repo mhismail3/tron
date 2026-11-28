@@ -148,6 +148,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                     try await app.activate("Artifacts")
                     try await app.until("the listing") { MountedFixture.elements(in: app.top).contains { (MountedFixture.identifier($0) ?? "").hasSuffix("_report-0-container") } }
                     try await settle(app, "band \(band)")
+                    XCTAssertGreaterThan(sheetFrame(app).minY, 120, "band \(band): the sheet is fitted")
                     measured[band] = Int(try XCTUnwrap(mainScroll(app)).contentSize.height.rounded())
                 }
             }

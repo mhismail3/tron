@@ -45,7 +45,6 @@ struct TronListRowContent: Equatable {
 }
 
 enum TronListMetrics {
-    static let eagerFeedRows = 60
     static let horizontalPadding: CGFloat = 14
     static let verticalPadding: CGFloat = 10
     static let slotGap: CGFloat = 12
@@ -517,7 +516,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
         ScrollViewReader { reader in
             ScrollView {
-                TronFeedStack(eager: items.count <= TronListMetrics.eagerFeedRows) {
+                TronFeedStack(eager: fits) {
                     header()
                     ForEach(items) { item in
                         row(item)
