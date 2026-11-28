@@ -211,7 +211,7 @@ actor HostedIntegrationsGateway {
                 let toolCount = argument("-artifacts-tools") ?? 0
                 let days = HostedLaunch.arguments.drop(while: { $0 != "-artifacts-report-days" }).dropFirst().first?.split(separator: ",").compactMap { Int($0) }
                 let reports = (0..<count).map { index in
-                    let day = days?[index] ?? index / 3
+                    let day = days.flatMap { index < $0.count ? $0[index] : nil } ?? index / 3
                     return entry("reports", dated(day, "report-\(index)"), "Report \(index + 1)", at(days: day, hours: Double(index % 3)), day: true)
                 }
                 let tools = (0..<toolCount).map { entry("artifacts", "tool-\($0)", "Tool \($0 + 1)", at(days: $0, hours: 1), day: false) }

@@ -256,7 +256,7 @@ selected primary theme; semantic statuses keep their colors.
   section keeps its category tint instead of the primary identity. Feeds (Memory, Tasks, Session History, Subagent History) are a
   `TronFeed` of `TronFeedCard`s, with the next page loaded by `FeedStore` while 5 rows remain.
   A feed lays its rows out lazily, except while its content-fit sheet is fitted: a fitted feed is
-  shorter than the screen, so its rows are laid out eagerly and its content height never depends on
+  shorter than its maximum detent, so its rows are laid out eagerly and its content height never depends on
   how much of it is in view; a lazy tail re-estimated under the sheet's edge would move the detent it
   sizes, and the sheet would chase it. The chip overlays the feed's scroll chrome, so it rests at the
   sheet's bottom on every frame.
