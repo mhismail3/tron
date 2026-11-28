@@ -453,14 +453,14 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         XCTAssertLessThanOrEqual(covered.minY, child.minY - 11.5, "\(name): the parent's top peeks above the sheet over it: \(covered) under \(child)")
         let window = app.window.bounds
         let keyboard = CGRect(x: 0, y: window.maxY - 336, width: window.width, height: 336)
-        let covered = sizes.count
+        let keyboardFrom = sizes.count
         UIView.setAnimationsEnabled(true)
         NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil,
                                         userInfo: [UIResponder.keyboardFrameEndUserInfoKey: NSValue(cgRect: keyboard)])
         for _ in 0..<60 { sample(); await MountedFixture.nextFrame() }
         XCTAssertLessThanOrEqual(sheetFrame(app).maxY, keyboard.minY - 7.5, "\(name): the keyboard lifts the nested sheet above it")
-        XCTAssertTrue(sizes[covered...].allSatisfy { abs($0.height - model.height) <= 0.5 },
-                      "\(name): the keyboard never resizes the covered parent: \(Set(sizes[covered...].map { Int($0.height) }))")
+        XCTAssertTrue(sizes[keyboardFrom...].allSatisfy { abs($0.height - model.height) <= 0.5 },
+                      "\(name): the keyboard never resizes the covered parent: \(Set(sizes[keyboardFrom...].map { Int($0.height) }))")
         NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
         for _ in 0..<60 { sample(); await MountedFixture.nextFrame() }
         _ = sheetChain(app).last?.presentingViewController?.dismiss(animated: true)
