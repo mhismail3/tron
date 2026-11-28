@@ -50,7 +50,7 @@ private final class TronSheetTransition: NSObject, UIViewControllerAnimatedTrans
     init(presenting: Bool) { self.presenting = presenting }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        TronSheetStage.response
+        presenting ? TronSheetStage.openResponse : TronSheetStage.response
     }
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
@@ -70,6 +70,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
     private enum Phase { case measuring, shown, dismissing }
 
     static let response: TimeInterval = 0.45
+    static let openResponse: TimeInterval = 0.36
     private static let inset: CGFloat = 8
     private static let toolbarDrop: CGFloat = 16
     private static let dimming: CGFloat = 0.478
@@ -226,7 +227,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
             UIView.performWithoutAnimation { Self.layoutStack(in: window) }
             finish()
         } else {
-            animate({ Self.layoutStack(in: window) }) { _ in finish() }
+            animate(response: Self.openResponse, { Self.layoutStack(in: window) }) { _ in finish() }
         }
     }
 
@@ -339,8 +340,9 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         if abs(wanted.top - current.top) > 0.5 || abs(wanted.bottom - current.bottom) > 0.5 { presented.additionalSafeAreaInsets = wanted }
     }
 
-    private func animate(velocity: CGFloat = 0, _ changes: @escaping () -> Void, completion: ((Bool) -> Void)? = nil) {
-        UIView.animate(springDuration: Self.response, bounce: 0, initialSpringVelocity: velocity, delay: 0,
+    private func animate(velocity: CGFloat = 0, response: TimeInterval = response, _ changes: @escaping () -> Void,
+                         completion: ((Bool) -> Void)? = nil) {
+        UIView.animate(springDuration: response, bounce: 0, initialSpringVelocity: velocity, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState], animations: changes, completion: completion)
     }
 
