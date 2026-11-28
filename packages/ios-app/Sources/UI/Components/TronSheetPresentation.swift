@@ -71,6 +71,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
 
     static let response: TimeInterval = 0.45
     private static let inset: CGFloat = 8
+    private static let toolbarDrop: CGFloat = 16
     private static let dimming: CGFloat = 0.478
     private static let deck = SheetDeck()
     private static var live: [TronSheetStage] = []
@@ -334,7 +335,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         presented.view.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
         let current = presented.additionalSafeAreaInsets
         let inherited = (top: presented.view.safeAreaInsets.top - current.top, bottom: presented.view.safeAreaInsets.bottom - current.bottom)
-        let wanted = UIEdgeInsets(top: -inherited.top, left: 0, bottom: Self.bottomSafeArea - inherited.bottom, right: 0)
+        let wanted = UIEdgeInsets(top: Self.toolbarDrop - inherited.top, left: 0, bottom: Self.bottomSafeArea - inherited.bottom, right: 0)
         if abs(wanted.top - current.top) > 0.5 || abs(wanted.bottom - current.bottom) > 0.5 { presented.additionalSafeAreaInsets = wanted }
     }
 

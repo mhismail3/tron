@@ -78,7 +78,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   `interactiveDismissDisabled` keep their SwiftUI owner), and the stage's transition animators put
   the content on one card that matches the iOS 26 sheet: Liquid Glass, 8 pt side and bottom insets,
   continuous 38 pt top and 54 pt bottom corners, no grabber, the native dimming behind the front
-  sheet, glass in the sheet's own colour scheme, safe area 0 top and the device's bottom inset. The content lays out at the full container width and the card scales it
+  sheet, glass in the sheet's own colour scheme, a 16 pt top safe area (the system bar's glass buttons sit at it and 16 pt from the sides, so a
+  corner button's 21 pt radius plus its 16 pt inset meets the sheet's corner, concentric) and the
+  device's bottom inset. The content lays out at the full container width and the card scales it
   to its own width, as the native floating sheet does. System presentations (share sheet, photo
   picker, file importer, Safari, popovers) and iPad (`TronPadSheetMode`) stay native. All
   progressive disclosure moves onto this one presenter; a surface never gets its own sheet patch.
