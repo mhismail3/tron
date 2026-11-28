@@ -96,6 +96,19 @@ Gateway `overrides` entry; `check-pi-sdk.integration.test.mjs` starts each real 
 isolated home and requires its installed fetch to reject a loopback body that mismatches tab-prefixed
 SRI metadata. The SDK cohort and conversation contracts remain unchanged.
 
+The MCP extension's `elicitation` option carries MCP 2026-07-28 form elicitation. When a host
+supplies it, an HTTP server whose `server/discover` lists `2026-07-28` gets stateless `tools/call`
+requests: per-request `_meta` declaring `elicitation.form`, and `MCP-Protocol-Version`, `Mcp-Method`
+and `Mcp-Name` headers. An `input_required` result asks the host each form request, then retries the
+identical call with the server's `requestState` and the `inputResponses`, at most three answered rounds;
+other kinds of input are declined, and an `input_required` from a server not confirmed stateless fails the call. Without the option no capability is declared. The Gateway's
+`mcp-elicitation.ts` renders each request on the existing form card (server message as context, the
+question, `enumNames` labels with `enum` values) for 15 minutes. Dismissal, timeout or a card error send
+`cancel`; an unrenderable schema, a session without UI, a Home task worker or an automation turn send
+`decline`; the server treats both as `DENY_ONCE`. Nothing
+is cached client-side; the server owns saved approvals. `mcp-elicitation.integration.test.ts` proves
+the direct and codemode paths, the retry binding and decline.
+
 `createAgentSession` and `createAgentSessionFromServices` accept a host `preamble` that replaces
 Pi's generic identity without suppressing tool snippets, tool guidelines or docs; a custom system
 prompt then renders as a separate `role` section. The Gateway supplies its common core this way.

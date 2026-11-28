@@ -61,7 +61,7 @@ Gateway-attributed owner name. `presentation/` owns the
 remote Pi host, component generations, bounded terminal capture and the single
 presentation epoch. `extension-lifecycle-coordinator.ts` derives quiescence from
 that epoch; the runtime replaces its activity source when rotating the host.
-`pi-builtins.ts` assembles the actual SDK factories for runtime and session-free loads.
+`pi-builtins.ts` assembles the actual SDK factories for runtime and session-free loads. `mcp-elicitation.ts` turns an MCP server's form elicitation into the existing form card; dismissal, a 15-minute timeout or a card error (including another form already pending) answer `cancel`, and no UI, a task worker or an automation answer `decline`, both of which the server treats as a denial.
 `extension-adapters.ts` owns the single MCP authorization context and foreign-package
 semantic form adapters, including their exact audited package admission.
 
