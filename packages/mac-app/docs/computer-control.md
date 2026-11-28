@@ -27,7 +27,7 @@ that app, and reports any prompt its tools cannot complete.
 
 `CuaProcessOwner` starts the bundled driver directly from this permission-bearing
 process, with `--embedded`, its exact host bundle ID, standard authorization, and
-an owned parent-liveness stdin pipe. The Gateway never launches the daemon. Cua's
+an owned parent-liveness stdin pipe, and `--no-overlay`: no agent cursor is drawn, so actions do not wait for its glide. The Gateway never launches the daemon. Cua's
 telemetry is disabled in both daemon and CLI environments. History, PiP, browser,
 agent, installer and backend-configuration surfaces are not exposed by `computer`.
 The native helper owns a private0700 directory and a fresh UUID-scoped socket for

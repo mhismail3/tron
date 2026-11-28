@@ -14,6 +14,7 @@ const OUTPUT_LIMIT = 2 * 1024 * 1024;
 const OBSERVATIONS = new Set(["help", "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_accessibility_tree", "get_cursor_position", "verify_state"]);
 const IMAGES = new Set(["get_window_state", "get_desktop_state"]);
 const ACTIONS = new Set(["launch_app", "set_window_frame", "bring_to_front", "click", "double_click", "right_click", "type_text", "press_key", "hotkey", "scroll", "drag", "move_cursor", "set_value"]);
+const UNWAITED = new Set(["click", "double_click", "right_click", "type_text", "press_key", "hotkey", "scroll", "drag", "set_value"]);
 const RESERVED = new Set(["session", "_session_id", "socket", "endpoint", "env", "screenshot_out_file"]);
 const DEADLINE_MS = 10_000;
 const TYPING_DEADLINE_MS = 125_000;
@@ -146,7 +147,7 @@ export class CuaComputerClient {
         signal?.throwIfAborted();
         if (this.closed) throw new Error("Computer session ended during activation");
       }
-      const args: Record<string, unknown> = { ...arguments_, session: this.binding.runtimeLoadID };
+      const args: Record<string, unknown> = { ...(UNWAITED.has(tool) ? { post_action_wait: "none" } : {}), ...arguments_, session: this.binding.runtimeLoadID };
       if (tool === "get_window_state") {
         for (const [field, fallback, maximum] of [["max_elements", 160, 200], ["max_depth", 12, 16]] as const) {
           const value = args[field] ?? fallback;

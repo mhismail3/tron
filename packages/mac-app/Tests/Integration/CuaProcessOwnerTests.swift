@@ -55,6 +55,7 @@ import Testing
             #expect(args["telemetry"] as? String == "false")
             #expect((args["arguments"] as? [String])?.contains("--parent-liveness-stdio") == true)
             #expect((args["arguments"] as? [String])?.contains("--permission-mode") == true)
+            #expect((args["arguments"] as? [String])?.contains("--no-overlay") == true)
         }
     }
 
