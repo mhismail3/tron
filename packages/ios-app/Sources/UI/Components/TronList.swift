@@ -45,6 +45,7 @@ struct TronListRowContent: Equatable {
 }
 
 enum TronListMetrics {
+    static let eagerFeedRows = 60
     static let horizontalPadding: CGFloat = 14
     static let verticalPadding: CGFloat = 10
     static let slotGap: CGFloat = 12
@@ -483,6 +484,19 @@ struct TronFeedEmptyState<Header: View, Placeholder: View>: View {
     }
 }
 
+private struct TronFeedStack<Content: View>: View {
+    let eager: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        if eager {
+            VStack(alignment: .leading, spacing: TronListMetrics.feedGap) { content() }.scrollTargetLayout()
+        } else {
+            LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) { content() }.scrollTargetLayout()
+        }
+    }
+}
+
 struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID: Hashable & Sendable {
     let items: [Item]
     let identifier: String
@@ -503,7 +517,7 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
         let trigger = items.count > 5 ? items[items.count - 5].id : items.last?.id
         ScrollViewReader { reader in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: TronListMetrics.feedGap) {
+                TronFeedStack(eager: items.count <= TronListMetrics.eagerFeedRows) {
                     header()
                     ForEach(items) { item in
                         row(item)
@@ -513,18 +527,17 @@ struct TronFeed<Item: Identifiable, Header: View, Row: View>: View where Item.ID
                     TronFeedStateRow(tail: tail, retry: retry)
                         .onAppear { if tail == .idle { loadMore() } }
                 }
-                .scrollTargetLayout()
                 .tronFeedInsets()
             }
             .safeAreaPadding(.bottom, fits ? 0 : chipRoom)
             .accessibilityIdentifier(identifier)
+            .tronScrollEdgeChrome()
             .overlay(alignment: .bottom) {
                 TronFeedPositionChip(position: position, total: total, totalIsExact: totalIsExact) {
                     guard let first = items.first?.id else { return }
                     withAnimation(.snappy) { reader.scrollTo(first, anchor: .top) }
                 }
             }
-            .tronScrollEdgeChrome()
             .onScrollGeometryChange(for: Bool.self) {
                 $0.contentInsets.top + $0.contentSize.height + $0.contentInsets.bottom > $0.containerSize.height + 0.5
             } action: { _, overflows in position.overflows = overflows }
