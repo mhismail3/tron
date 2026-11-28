@@ -177,6 +177,32 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testDeepStackIsACompactDeck() async throws {
+        try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
+            try await app.activate("Open Settings")
+            try await app.until("Settings opens") { sheetChain(app).count == 1 }
+            for (step, key) in ["settings-link-Connections", "Details for Fixture", "Server info"].enumerated() {
+                try await app.waitForTopSheetToSettle()
+                _ = try await revealed(app, key)
+                try await app.activate(key)
+                try await app.until("\(key) opens") { sheetChain(app).count == step + 2 }
+            }
+            try await app.waitForTopSheetToSettle()
+            let frames = sheetChain(app).map(rendered)
+            let front = frames.last!
+            let log = frames.map { "\(Int($0.minY))/\(Int($0.minX))x\(Int($0.width))" }.joined(separator: " ")
+            for i in (0..<frames.count - 1).reversed() {
+                let above = frames[i].minY, next = frames[i + 1].minY
+                XCTAssertLessThan(above, next - 1, "sheet \(i + 1) peeks above sheet \(i + 2): \(log)")
+                XCTAssertGreaterThanOrEqual(above, next - 12.5, "sheet \(i + 1) shows at most one 12 pt band above sheet \(i + 2): \(log)")
+                XCTAssertLessThan(frames[i].width, frames[i + 1].width - 1, "sheet \(i + 1) is narrower than sheet \(i + 2): \(log)")
+                XCTAssertEqual(frames[i].midX, front.midX, accuracy: 0.5, "the deck is centred: \(log)")
+                XCTAssertGreaterThan(above, app.window.safeAreaInsets.top, "inside the screen, clear of the status bar: \(log)")
+            }
+            XCTAssertLessThan(front.minY - frames[0].minY, 40, "a compact deck: \(log)")
+        }
+    }
+
     func testSwipeDownDismissesOnlyTheTopSheet() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
@@ -451,6 +477,9 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         let covered = rendered(parent)
         XCTAssertLessThan(covered.width, child.width - 10, "\(name): the parent steps back narrower than the sheet over it, a deck card: \(covered) under \(child)")
         XCTAssertLessThanOrEqual(covered.minY, child.minY - 11.5, "\(name): the parent's top peeks above the sheet over it: \(covered) under \(child)")
+        XCTAssertEqual(covered.minY, child.minY - 12, accuracy: 0.5, "\(name): the parent shows one 12 pt deck band above the sheet over it: \(covered) under \(child)")
+        XCTAssertEqual(covered.width, child.width - 20, accuracy: 0.5, "\(name): the parent is 10 pt narrower per side: \(covered) under \(child)")
+        XCTAssertEqual(covered.midX, child.midX, accuracy: 0.5, "\(name): the deck is centred")
         let window = app.window.bounds
         let keyboard = CGRect(x: 0, y: window.maxY - 336, width: window.width, height: 336)
         let keyboardFrom = sizes.count
@@ -472,7 +501,8 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                       "\(name): the parent never resizes while a nested sheet comes and goes: \(Set(sizes.map { "\(Int($0.width))x\(Int($0.height))" }))")
         XCTAssertTrue(frames.allSatisfy { abs($0.width / $0.height - start.width / start.height) <= 0.005 },
                       "\(name): the parent only scales as a card, never reflows\n\(log)")
-        XCTAssertTrue(frames.allSatisfy { $0.minY <= start.minY + 0.5 }, "\(name): the parent is never tucked down under the nested sheet\n\(log)")
+        XCTAssertTrue(frames.allSatisfy { $0.minY <= max(start.minY, child.minY - 12) + 0.5 },
+                      "\(name): the parent travels only between its own place and its deck band, never below either\n\(log)")
         XCTAssertTrue(frames[..<keyboardFrom].allSatisfy { $0.minY >= min(start.minY, child.minY - 12) - 0.5 },
                       "\(name): the parent rises no further than its deck peek above the nested sheet\n\(log)")
         try await app.waitForTopSheetToSettle()
