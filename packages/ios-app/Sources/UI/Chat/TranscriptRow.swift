@@ -87,6 +87,40 @@ enum TranscriptRowPresentationPolicy {
     }
 }
 
+private struct ChatProvidersKey: EnvironmentKey {
+    static let defaultValue: [String: ProviderSummary] = [:]
+}
+
+extension EnvironmentValues {
+    var chatProviders: [String: ProviderSummary] {
+        get { self[ChatProvidersKey.self] }
+        set { self[ChatProvidersKey.self] = newValue }
+    }
+}
+
+enum ChatModelAttribution {
+    static func text(provider: String, model: String, thinkingLevel: String?, providers: [String: ProviderSummary]) -> String {
+        let providerName = providers[provider]?.displayName ?? ModelDisplayFormatting.provider(provider)
+        let physical = "\(providerName) / \(ModelDisplayFormatting.model(model))"
+        guard let thinkingLevel, !thinkingLevel.isEmpty else { return physical }
+        return "\(physical) · \(ThinkingLevelPresentation.title(thinkingLevel))"
+    }
+}
+
+private struct ModelAttributionFooter: View {
+    @Environment(\.chatProviders) private var providers
+    let provider: String
+    let model: String
+    let thinkingLevel: String?
+
+    var body: some View {
+        Text(ChatModelAttribution.text(provider: provider, model: model, thinkingLevel: thinkingLevel,
+                                       providers: providers))
+            .font(TronFont.mono(10))
+            .foregroundStyle(Color.tronTextSecondary)
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
@@ -267,9 +301,8 @@ struct TranscriptRow: View, Equatable {
                     }
                 }
                 if let modelAttribution {
-                    Text(modelAttribution)
-                        .font(TronFont.mono(10))
-                        .foregroundStyle(Color.tronTextSecondary)
+                    ModelAttributionFooter(provider: modelAttribution.provider, model: modelAttribution.model,
+                                           thinkingLevel: item.thinkingLevel)
                 }
             }
             .padding(.horizontal, item.role == .user ? 0 : 2)
@@ -280,7 +313,7 @@ struct TranscriptRow: View, Equatable {
         }
     }
 
-    var modelAttribution: String? {
+    var modelAttribution: (provider: String, model: String)? {
         guard !streaming, showsMessageFooter,
               item.role == .assistant,
               displayedMessageParts.contains(where: { part in
@@ -291,11 +324,7 @@ struct TranscriptRow: View, Equatable {
               }),
               let provider = item.provider,
               let modelName = item.modelId else { return nil }
-        let physical = ModelDisplayFormatting.reference(provider: provider, model: modelName)
-        if let thinking = item.thinkingLevel, !thinking.isEmpty {
-            return "\(physical) · \(ThinkingLevelPresentation.title(thinking))"
-        }
-        return physical
+        return (provider, modelName)
     }
 
     private var displayedMessageParts: [ChatMessagePart] {
