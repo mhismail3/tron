@@ -1559,10 +1559,17 @@ index 8e8553c2354fe43b9ca9ef24a0ff45af5b4d8eaa..a85e9ca6fc8da27f6c382bfe9df19018
  		servers: [...state.servers.values()],
  		...(state.autoEnableCodemode === undefined ? {} : { autoEnableCodemode: state.autoEnableCodemode }),
 diff --git a/packages/coding-agent/src/extensions/mcp/index.ts b/packages/coding-agent/src/extensions/mcp/index.ts
-index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a2dff9e41 100644
+index d3ef248b48e280073fd3e88737a4af8c4d98b168..4ba60323e22f73a16104f66436a3ada2922778c1 100644
 --- a/packages/coding-agent/src/extensions/mcp/index.ts
 +++ b/packages/coding-agent/src/extensions/mcp/index.ts
-@@ -68,7 +68,7 @@ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
+@@ -62,13 +62,13 @@ import {
+ import { loadMcpRuntime } from "./runtime.lazy.ts";
+ import type * as McpRuntime from "./runtime.ts";
+ import type { McpServerConnection, McpServerLog, McpTransportFactory } from "./runtime.ts";
+-import { createMcpToolDefinition, createMcpToolRenderers, type McpToolDetails } from "./tools.ts";
++import { createMcpToolDefinition, createMcpToolRenderers, type McpElicitation, type McpToolDetails } from "./tools.ts";
+ import { type McpMenu, type McpUi, showMcpManager } from "./ui.ts";
+ 
  export type { McpTransportFactory } from "./runtime.ts";
  
  export interface McpExtensionOptions {
@@ -1571,16 +1578,18 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  	loadConfig?: (ctx: ExtensionContext) => LoadedMcpConfig;
  	/** Defaults to stdio and streamable HTTP transports built from the server config. */
  	createTransport?: McpTransportFactory;
-@@ -89,6 +89,8 @@ export interface McpExtensionOptions {
+@@ -89,6 +89,10 @@ export interface McpExtensionOptions {
  	 * waited for when a script or search needs them. Default: 10000.
  	 */
  	startupWaitMs?: number;
 +	/** Renders the `mcp_servers` section from the listed servers. Defaults to {@link renderServersSection}'s text. */
 +	renderServers?: (servers: McpServerSummary[]) => string | undefined;
++	/** Asks the user the form elicitations of stateless servers. Without it, no elicitation capability is declared. */
++	elicitation?: McpElicitation;
  }
  
  const DEFAULT_STARTUP_WAIT_MS = 10_000;
-@@ -164,7 +166,7 @@ const MAX_SERVER_DESCRIPTION_CHARS = 250;
+@@ -164,7 +168,7 @@ const MAX_SERVER_DESCRIPTION_CHARS = 250;
  export const MAX_SERVERS_SECTION_CHARS = 4096;
  
  /** The section's first line. It explains only the ways of reaching tools that the listed servers use. */
@@ -1589,7 +1598,7 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  	let intro = "MCP servers whose tools are not declared to you.";
  	if (reaches.has("codemode")) intro += " Call the tools of `codemode` servers from codemode scripts.";
  	if (reaches.has("tool_search")) intro += " Load the tools of `tool_search` servers with `tool_search`.";
-@@ -187,16 +189,31 @@ export interface McpServerListing {
+@@ -187,16 +191,31 @@ export interface McpServerListing {
   * tools are reached and a one-line summary. The model learns of the servers from it, since neither
   * codemode nor tool_search lists them. Undefined when there are no such servers.
   */
@@ -1628,7 +1637,7 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  	const omitted = (count: number) =>
  		count > 0 ? [`- … ${count} more server${count === 1 ? "" : "s"}; find their tools with searchTools()`] : [];
  	// Characters of the intro, the first `kept` server lines without descriptions, and the omission line.
-@@ -209,10 +226,7 @@ export function renderServersSection(servers: readonly McpServerListing[]): stri
+@@ -209,10 +228,7 @@ export function renderServersSection(servers: readonly McpServerListing[]): stri
  			? 0
  			: Math.min(MAX_SERVER_DESCRIPTION_CHARS, Math.floor((MAX_SERVERS_SECTION_CHARS - size(kept)) / kept) - 2);
  	const lines = listed.slice(0, kept).map((server, index) => {
@@ -1640,7 +1649,7 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  		return summary ? `${heads[index]}: ${summary}` : heads[index];
  	});
  	return [intro, ...lines, ...omitted(listed.length - kept)].join("\n");
-@@ -291,8 +305,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -291,8 +307,8 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  		/** Whether a prompt already waited for the startup connections since the session started. */
  		let waitedForStartup = false;
  		const startupWaitMs = options.startupWaitMs ?? DEFAULT_STARTUP_WAIT_MS;
@@ -1651,7 +1660,15 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  		let credentials = options.credentials;
  		/** The session's model registry, which resolves `auth.provider` tokens. */
  		let modelRegistry: ModelRegistry | undefined;
-@@ -565,7 +579,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -437,6 +453,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 						return client;
+ 					},
+ 					readableResources: () => resourceServers().some((current) => current.name === server),
++					...(options.elicitation ? { elicit: options.elicitation.elicit } : {}),
+ 				});
+ 				definitions.set(definition.name, definition);
+ 				pi.registerTool(definition);
+@@ -565,11 +582,12 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			if (!isCurrent()) return undefined;
  			const connection = new runtime.McpServerConnection({
  				entry: server.entry,
@@ -1660,7 +1677,12 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  				createTransport: options.createTransport ?? runtime.createDefaultTransport,
  				credentials: getCredentials(runtime),
  				providerToken: async (provider) => modelRegistry?.getApiKeyForProvider(provider),
-@@ -1116,7 +1130,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+ 				log: getServerLog(runtime),
++				...(options.elicitation ? { elicitationClientName: options.elicitation.clientName } : {}),
+ 				onTools: (connection) => {
+ 					if (isCurrent()) registerTools(connection);
+ 				},
+@@ -1116,7 +1134,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  			autoEnableCodemode = loaded.autoEnableCodemode ?? true;
  			warnedUnreachable = false;
  			waitedForStartup = false;
@@ -1669,16 +1691,18 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  			modelRegistry = ctx.modelRegistry;
  			session = new AbortController();
  			const { signal } = session;
-@@ -1176,7 +1190,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1176,7 +1194,9 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  		pi.on("before_agent_start", async (event, ctx) => {
  			await waitForDirectServers(ctx);
  			const { sections } = event.systemPromptOptions;
 -			const section = renderServersSection(servers);
-+			const section = options.renderServers ? options.renderServers(listServers(servers)) : renderServersSection(servers);
++			const section = options.renderServers
++				? options.renderServers(listServers(servers))
++				: renderServersSection(servers);
  			if (section) sections[MCP_SERVERS_SECTION] = section;
  			else delete sections[MCP_SERVERS_SECTION];
  		});
-@@ -1339,7 +1353,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
+@@ -1339,7 +1359,7 @@ export function createMcpExtension(options: McpExtensionOptions = {}): Extension
  }
  
  function defaultLoadConfig(ctx: ExtensionContext): LoadedMcpConfig {
@@ -1688,10 +1712,18 @@ index d3ef248b48e280073fd3e88737a4af8c4d98b168..33fab469fdf73fe2cfabdcfb05433a7a
  
  export default createMcpExtension();
 diff --git a/packages/coding-agent/src/extensions/mcp/runtime.ts b/packages/coding-agent/src/extensions/mcp/runtime.ts
-index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b72400c18 100644
+index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..2d78d31fe4a7569bb0dfccba843c6938d2034aa8 100644
 --- a/packages/coding-agent/src/extensions/mcp/runtime.ts
 +++ b/packages/coding-agent/src/extensions/mcp/runtime.ts
-@@ -35,7 +35,11 @@ import {
+@@ -17,6 +17,7 @@ import {
+ 	McpAuthRequiredError,
+ 	McpClient,
+ 	McpError,
++	type McpFetch,
+ 	McpHttpError,
+ 	type McpRequestOptions,
+ 	McpSessionExpiredError,
+@@ -35,13 +36,17 @@ import {
  	type OAuthChallenge,
  } from "@earendil-works/pi-mcp/oauth";
  import { VERSION } from "../../config.ts";
@@ -1704,7 +1736,72 @@ index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b
  import { sliceTail } from "../../core/tools/truncate.ts";
  import type { McpServerEntry } from "./config.ts";
  import type { McpServerLog } from "./log.ts";
-@@ -62,7 +66,8 @@ export type McpTransportFactory = (
+ import { createMcpAuthProvider, type McpOAuthCredentialStore } from "./oauth.ts";
+ import type { McpResourceServer } from "./resources.ts";
+-import type { McpToolCaller } from "./tools.ts";
++import type { McpElicitationRequest, McpElicitationResponse, McpToolCaller, McpToolCallOptions } from "./tools.ts";
+ 
+ export { McpSignInCancelledError } from "@earendil-works/pi-mcp/oauth";
+ export { McpServerLog } from "./log.ts";
+@@ -51,6 +56,57 @@ const DEFAULT_TIMEOUT_SECONDS = 60;
+ const STDERR_TAIL_CHARS = 2_000;
+ /** Delays between attempts to connect to an HTTP server that failed with a transient error. */
+ const CONNECT_RETRY_DELAYS_MS = [250, 1_000];
++/** MCP 2026-07-28 stateless requests, where a tools/call result may ask for input and the call is retried. */
++const STATELESS_VERSION = "2026-07-28";
++const META_VERSION = "io.modelcontextprotocol/protocolVersion";
++const MAX_ELICITATION_ROUNDS = 3;
++
++function isRecord(value: unknown): value is Record<string, unknown> {
++	return typeof value === "object" && value !== null && !Array.isArray(value);
++}
++
++function statelessMeta(clientName: string): Record<string, unknown> {
++	return {
++		[META_VERSION]: STATELESS_VERSION,
++		"io.modelcontextprotocol/clientInfo": { name: clientName, version: VERSION },
++		"io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
++	};
++}
++
++/** Stateless tools/call requests carry their version, method and tool name in headers too. */
++const statelessFetch: McpFetch = (input, init) => {
++	const body =
++		typeof init?.body === "string" && init.body.includes(STATELESS_VERSION) ? JSON.parse(init.body) : undefined;
++	const params = isRecord(body) && body.method === "tools/call" && isRecord(body.params) ? body.params : undefined;
++	if (!params || !isRecord(params._meta) || params._meta[META_VERSION] !== STATELESS_VERSION)
++		return fetch(input, init);
++	const headers = new Headers(init?.headers);
++	headers.set("MCP-Protocol-Version", STATELESS_VERSION);
++	headers.set("Mcp-Method", "tools/call");
++	headers.set("Mcp-Name", String(params.name));
++	return fetch(input, { ...init, headers });
++};
++
++/** The answers to a result's form elicitations, asked one at a time; other kinds of input are declined. */
++async function answerInputRequests(
++	requests: unknown,
++	server: string,
++	tool: string,
++	elicit: (request: McpElicitationRequest) => Promise<McpElicitationResponse>,
++): Promise<Record<string, McpElicitationResponse>> {
++	const answers: Record<string, McpElicitationResponse> = {};
++	for (const [key, request] of Object.entries(isRecord(requests) ? requests : {})) {
++		const params = isRecord(request) && request.method === "elicitation/create" ? request.params : undefined;
++		answers[key] =
++			isRecord(params) &&
++			(params.mode ?? "form") === "form" &&
++			typeof params.message === "string" &&
++			isRecord(params.requestedSchema)
++				? await elicit({ server, tool, message: params.message, requestedSchema: params.requestedSchema })
++				: { action: "decline" };
++	}
++	return answers;
++}
+ 
+ /**
+  * `disconnected`: the connection dropped (for example the stdio server exited); the next call
+@@ -62,7 +118,8 @@ export type McpTransportFactory = (
  	entry: McpServerEntry,
  	cwd: string,
  	authProvider: AuthProvider | undefined,
@@ -1714,7 +1811,7 @@ index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b
  
  function errorMessage(error: unknown): string {
  	return error instanceof Error ? error.message : String(error);
-@@ -97,22 +102,43 @@ function expandHome(value: string): string {
+@@ -97,22 +154,44 @@ function expandHome(value: string): string {
  	return value;
  }
  
@@ -1753,6 +1850,7 @@ index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b
 -			headers: resolveHeadersOrThrow(config.headers, `MCP server "${name}"`),
 +			headers,
  			authProvider,
++			fetch: statelessFetch,
  		});
  	}
  	const env: Record<string, string> = {};
@@ -1762,7 +1860,70 @@ index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b
  	}
  	return new StdioTransport({
  		command: expandHome(config.command),
-@@ -377,7 +403,11 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+@@ -164,6 +243,9 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 	private readonly onTools: (connection: McpServerConnection) => void;
+ 	private readonly onChange: ((connection: McpServerConnection) => void) | undefined;
+ 	private readonly log: McpServerLog | undefined;
++	private readonly elicitationClientName: string | undefined;
++	/** Clients whose server accepts stateless requests, so form elicitation reaches the user. */
++	private readonly statelessClients = new WeakSet<McpClient>();
+ 
+ 	constructor(options: {
+ 		entry: McpServerEntry;
+@@ -177,7 +259,10 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 		onChange?: (connection: McpServerConnection) => void;
+ 		/** Receives the server's log messages (`notifications/message`). */
+ 		log?: McpServerLog;
++		/** Client name for stateless requests; set when the host can ask the user an elicitation. */
++		elicitationClientName?: string;
+ 	}) {
++		this.elicitationClientName = options.elicitationClientName;
+ 		this.entry = options.entry;
+ 		this.cwd = options.cwd;
+ 		this.createTransport = options.createTransport;
+@@ -245,8 +330,39 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 		return this.opening;
+ 	}
+ 
+-	callTool(name: string, args: Record<string, unknown>, options: McpRequestOptions): Promise<CallToolResult> {
+-		return this.withClient((client) => client.callTool(name, args, options));
++	/**
++	 * Call a tool. On a stateless server that answers with `input_required`, ask the user each form
++	 * elicitation and retry the identical call with the server's `requestState` and the answers.
++	 */
++	async callTool(name: string, args: Record<string, unknown>, options: McpToolCallOptions): Promise<CallToolResult> {
++		const { elicit, ...requestOptions } = options;
++		const clientName = this.elicitationClientName;
++		let retry: Record<string, unknown> = {};
++		for (let round = 0; ; round++) {
++			let stateless = false;
++			const result = await this.withClient(async (client) => {
++				stateless = elicit !== undefined && clientName !== undefined && this.statelessClients.has(client);
++				if (!stateless || clientName === undefined) {
++					if (round > 0)
++						throw new Error(`MCP server "${this.entry.name}" lost its stateless connection during ${name}`);
++					return client.callTool(name, args, requestOptions);
++				}
++				const params = { name, arguments: args, ...retry, _meta: statelessMeta(clientName) };
++				return client.request("tools/call", params, requestOptions);
++			});
++			if (!isRecord(result) || (result.content !== undefined && !Array.isArray(result.content))) {
++				throw new McpError(JSON_RPC_ERROR_CODES.invalidRequest, "Invalid MCP tools/call result");
++			}
++			const { resultType, inputRequests, requestState, ...complete } = result;
++			if (resultType !== "input_required") return { ...complete, content: complete.content ?? [] } as CallToolResult;
++			if (!elicit || !stateless || round >= MAX_ELICITATION_ROUNDS) {
++				throw new Error(`MCP server "${this.entry.name}" still requires input for ${name}`);
++			}
++			retry = {
++				...(requestState === undefined ? {} : { requestState }),
++				inputResponses: await answerInputRequests(inputRequests, this.entry.name, name, elicit),
++			};
++		}
+ 	}
+ 
+ 	readResource(uri: string, options: McpRequestOptions): Promise<ReadResourceResult> {
+@@ -377,7 +493,11 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
  		this.shutdown.signal.addEventListener("abort", closeClient, { once: true });
  		let transport: McpTransport | undefined;
  		try {
@@ -1775,8 +1936,119 @@ index 2e998f86ea52f90b38aa93fc1e93e9c6222b3ff5..f96592ba836f4ea9c34429392849124b
  			await client.connect(transport);
  			client.onNotification("notifications/tools/list_changed", () => {
  				void this.refreshTools(client);
+@@ -386,6 +506,13 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 			client.onClose(() => this.handleClientClose(client, stdio));
+ 			// Servers without the tools capability (prompts or resources only) do not answer tools/list.
+ 			const tools = client.serverCapabilities?.tools ? await client.listTools() : [];
++			if (
++				this.elicitationClientName !== undefined &&
++				"url" in this.entry.config &&
++				(await this.acceptsStateless(client))
++			) {
++				this.statelessClients.add(client);
++			}
+ 			if (this.closed) throw new Error("shut down while connecting");
+ 			if (client.connectionState !== "connected") throw new Error("connection closed during setup");
+ 			this.client = client;
+@@ -419,6 +546,24 @@ export class McpServerConnection implements McpToolCaller, McpResourceServer {
+ 		return new Error(`MCP server "${this.entry.name}" failed to connect: ${this.error}`);
+ 	}
+ 
++	/** Whether `server/discover` lists the stateless version. Servers without it answer with an error. */
++	private async acceptsStateless(client: McpClient): Promise<boolean> {
++		try {
++			const result = await client.request(
++				"server/discover",
++				{ _meta: statelessMeta(this.elicitationClientName ?? "") },
++				{ timeoutMs: Math.min(this.timeoutMs, 10_000) },
++			);
++			return (
++				isRecord(result) &&
++				Array.isArray(result.supportedVersions) &&
++				result.supportedVersions.includes(STATELESS_VERSION)
++			);
++		} catch {
++			return false;
++		}
++	}
++
+ 	/** The transport dropped. The next call reconnects; until then the status shows why. */
+ 	private handleClientClose(client: McpClient, stdio: StdioTransport | undefined): void {
+ 		if (this.client !== client || this.closed) return;
+diff --git a/packages/coding-agent/src/extensions/mcp/tools.ts b/packages/coding-agent/src/extensions/mcp/tools.ts
+index a484d21b22f6e0224b6e8d18ec3ce48c28a43fd4..6d0f460faec4d6068e06048494c1d407eaaa4203 100644
+--- a/packages/coding-agent/src/extensions/mcp/tools.ts
++++ b/packages/coding-agent/src/extensions/mcp/tools.ts
+@@ -25,6 +25,7 @@ import {
+ import { Container, Spacer, Text } from "@earendil-works/pi-tui";
+ import type { TSchema } from "typebox";
+ import type {
++	ExtensionContext,
+ 	ToolAnnotations,
+ 	ToolDefinition,
+ 	ToolExposure,
+@@ -64,8 +65,36 @@ export function saveToTempFile(data: string | Uint8Array, extension: string): Pr
+ 	return writeOutputFile("pi-mcp", extension, data);
+ }
+ 
++/** A form elicitation a server sent with an `input_required` tools/call result. */
++export interface McpElicitationRequest {
++	server: string;
++	tool: string;
++	message: string;
++	requestedSchema: Record<string, unknown>;
++}
++
++/** The user's answer to an elicitation. `decline` and `cancel` carry no content. */
++export type McpElicitationResponse =
++	| { action: "accept"; content: Record<string, unknown> }
++	| { action: "decline" | "cancel" };
++
++/** How the host asks the user an elicitation. A host without it declares no elicitation capability. */
++export interface McpElicitation {
++	/** Client name the server may show in its question. */
++	clientName: string;
++	elicit(
++		request: McpElicitationRequest,
++		ctx: ExtensionContext | undefined,
++		signal: AbortSignal | undefined,
++	): Promise<McpElicitationResponse>;
++}
++
++export interface McpToolCallOptions extends McpRequestOptions {
++	elicit?: (request: McpElicitationRequest) => Promise<McpElicitationResponse>;
++}
++
+ export interface McpToolCaller {
+-	callTool(name: string, args: Record<string, unknown>, options: McpRequestOptions): Promise<CallToolResult>;
++	callTool(name: string, args: Record<string, unknown>, options: McpToolCallOptions): Promise<CallToolResult>;
+ }
+ 
+ function textOf(content: readonly (TextContent | ImageContent)[]): string {
+@@ -256,6 +285,7 @@ export function createMcpToolDefinition(options: {
+ 	getClient: () => Promise<McpToolCaller>;
+ 	/** Whether `read_mcp_resource` can read the server's resources. */
+ 	readableResources?: () => boolean;
++	elicit?: McpElicitation["elicit"];
+ }): ToolDefinition<TSchema, McpToolDetails> {
+ 	const { server, tool } = options;
+ 	const title = tool.title ?? tool.annotations?.title;
+@@ -272,10 +302,12 @@ export function createMcpToolDefinition(options: {
+ 		namespace: options.namespace,
+ 		...(annotations ? { annotations } : {}),
+ 		...createMcpToolRenderers(label),
+-		async execute(_toolCallId, params, signal, onUpdate) {
++		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+ 			const client = await options.getClient();
++			const elicit = options.elicit;
+ 			const result = await client.callTool(tool.name, (params ?? {}) as Record<string, unknown>, {
+ 				signal,
++				...(elicit ? { elicit: (request: McpElicitationRequest) => elicit(request, ctx, signal) } : {}),
+ 				timeoutMs: options.timeoutMs,
+ 				onProgress: (progress) => {
+ 					const total = progress.total === undefined ? "" : `/${progress.total}`;
 diff --git a/packages/coding-agent/src/index.ts b/packages/coding-agent/src/index.ts
-index bfa256ab8808c5cdba852aedbfacabf2950a15e9..1697bae730f9b89c5eb7c4d901a54d12867ec289 100644
+index bfa256ab8808c5cdba852aedbfacabf2950a15e9..55a88c81bd4bc0891970976b2bf2567f88005f0a 100644
 --- a/packages/coding-agent/src/index.ts
 +++ b/packages/coding-agent/src/index.ts
 @@ -249,6 +249,13 @@ export type {
@@ -1793,7 +2065,7 @@ index bfa256ab8808c5cdba852aedbfacabf2950a15e9..1697bae730f9b89c5eb7c4d901a54d12
  export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.ts";
  export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.ts";
  // SDK for programmatic usage
-@@ -414,8 +421,14 @@ export {
+@@ -414,8 +421,21 @@ export {
  // Built-in extensions. The CLI loads them; SDK sessions add them to their extension factories.
  export { type CodemodeExtensionOptions, createCodemodeExtension } from "./extensions/codemode/index.ts";
  export type { CodemodeStoreEntryData, CodemodeToolDetails } from "./extensions/codemode/tool.ts";
@@ -1806,7 +2078,14 @@ index bfa256ab8808c5cdba852aedbfacabf2950a15e9..1697bae730f9b89c5eb7c4d901a54d12
 +	type McpServerConfig,
 +	type McpServerEntry,
 +} from "./extensions/mcp/config.ts";
-+export { createMcpExtension, type McpExtensionOptions, type McpServerSummary, type McpTransportFactory, serversSectionIntro } from "./extensions/mcp/index.ts";
++export {
++	createMcpExtension,
++	type McpExtensionOptions,
++	type McpServerSummary,
++	type McpTransportFactory,
++	serversSectionIntro,
++} from "./extensions/mcp/index.ts";
++export type { McpElicitation, McpElicitationRequest, McpElicitationResponse } from "./extensions/mcp/tools.ts";
  export { createToolSearchExtension } from "./extensions/tool-search/index.ts";
  // Main entry point
  export { type MainOptions, main } from "./main.ts";
