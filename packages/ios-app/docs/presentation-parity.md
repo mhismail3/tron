@@ -138,11 +138,13 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   there. A sheet's height never reaches the sheet that presented it. A pushed sheet is measured
   before it rises, so it opens at its final height.
   A child sheet opens over its parent at its own fitted height whatever the parent's size; the
-  sheets behind step back as a deck (`SheetDeck`: the card just behind is 10 pt narrower per side and
-  peeks 12 pt above the front sheet, each further card adds 0.62 of the step before, so the deck is
-  at most about 32 pt high; more than 6 back are not drawn).
-  A parent only scales and moves as a card; its laid-out size never changes, it is never tucked
-  under the child, and closing the child springs it back. Dragging the front sheet down follows the
+  sheets behind step back as a deck with Glass Lab's `SheetDeck` geometry: the card just behind sits on
+  the front sheet's frame, its top 12 pt above the front sheet's and 10 pt narrower per side, each further
+  card adding 0.62 of the step before (the whole deck peeks under 32 pt; more than 6 back are not drawn),
+  and every card's glass ends at the front sheet's bottom edge. So a covered sheet shows only its top band,
+  whatever its own height.
+  A parent only scales, moves and is clipped as a card; its laid-out size never changes, and closing
+  the child springs it back to its own place. Dragging the front sheet down follows the
   finger at its own height and steps the deck forward with it; a short slow drag springs back, a
   flick or a drag past half the sheet closes only that sheet. The keyboard lifts the front sheet
   above it at its own height on the keyboard's curve, capping it below the status bar.

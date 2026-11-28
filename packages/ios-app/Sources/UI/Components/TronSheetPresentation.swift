@@ -16,11 +16,11 @@ struct SheetDeck: Equatable, Sendable {
         depth > 0 ? (1 - pow(falloff, depth)) / (1 - falloff) : 0
     }
 
-    func card(resting rest: CGRect, behind front: CGRect, depth: CGFloat) -> CGRect {
+    func card(behind front: CGRect, depth: CGFloat) -> CGRect {
         let back = steps(depth)
-        let width = front.width - 2 * min(inset * back, front.width * 0.25)
-        return CGRect(x: front.midX - width / 2, y: min(rest.minY, front.minY - peek * back),
-                      width: width, height: rest.height * width / max(rest.width, 1))
+        let dx = min(inset * back, front.width * 0.25)
+        return CGRect(x: front.minX + dx, y: front.minY - peek * back, width: front.width - 2 * dx,
+                      height: front.height + peek * back)
     }
 }
 
@@ -262,7 +262,9 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         let shift = front.drag > 0 ? min(front.drag / max(frontRect.height, 1), 1) : 0
         for (index, sheet) in sheets.enumerated() {
             let depth = CGFloat(sheets.count - 1 - index)
-            sheet.place(depth == 0 ? frontRect : deck.card(resting: sheet.restRect, behind: frontRect, depth: depth - shift))
+            let back = depth - shift
+            let card = deck.card(behind: frontRect, depth: max(back, 1))
+            sheet.place(depth == 0 ? frontRect : back >= 1 ? card : sheet.restRect.blend(to: card, back))
             sheet.card.alpha = depth > deck.visibleDepth ? 0 : 1
             sheet.backdrop.backgroundColor = index == 0 ? UIColor.black.withAlphaComponent(dimming) : .clear
         }
@@ -318,12 +320,12 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         guard let containerView, let presented = presentedViewController else { return }
         let bounds = containerView.bounds
         let height = layoutHeight
-        card.bounds = CGRect(x: 0, y: 0, width: bounds.width, height: height)
-        card.center = CGPoint(x: rect.midX, y: rect.minY)
         let scale = rect.width / max(bounds.width, 1)
+        card.bounds = CGRect(x: 0, y: 0, width: bounds.width, height: min(height, rect.height / max(scale, 0.01)))
+        card.center = CGPoint(x: rect.midX, y: rect.minY)
         card.transform = CGAffineTransform(scaleX: scale, y: scale)
         glass.frame = card.bounds
-        presented.view.frame = card.bounds
+        presented.view.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
         let current = presented.additionalSafeAreaInsets
         let inherited = (top: presented.view.safeAreaInsets.top - current.top, bottom: presented.view.safeAreaInsets.bottom - current.bottom)
         let wanted = UIEdgeInsets(top: -inherited.top, left: 0, bottom: Self.bottomSafeArea - inherited.bottom, right: 0)
@@ -431,3 +433,9 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
     }
 }
 
+private extension CGRect {
+    func blend(to other: CGRect, _ amount: CGFloat) -> CGRect {
+        CGRect(x: minX + (other.minX - minX) * amount, y: minY + (other.minY - minY) * amount,
+               width: width + (other.width - width) * amount, height: height + (other.height - height) * amount)
+    }
+}
