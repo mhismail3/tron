@@ -69,6 +69,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
 
     static let response: TimeInterval = 0.45
     private static let inset: CGFloat = 8
+    private static let dimming: CGFloat = 0.478
     private static let deck = SheetDeck()
     private static var live: [TronSheetStage] = []
     private static var keyboardTop = CGFloat.infinity
@@ -152,6 +153,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         self.containerView = containerView
         backdrop.frame = containerView.bounds
         backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        backdrop.backgroundColor = .clear
         containerView.addSubview(backdrop)
         containerView.addSubview(card)
         content.autoresizingMask = []
@@ -166,6 +168,10 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         backdrop.removeFromSuperview()
         Self.live.removeAll { $0 === self }
         UIView.performWithoutAnimation { Self.layoutStack(in: window) }
+    }
+
+    func appearance(_ style: UIUserInterfaceStyle) {
+        card.overrideUserInterfaceStyle = style
     }
 
     func contentTarget(_ next: TronSheetTarget) {
@@ -236,6 +242,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         }
         let changes = {
             self.place(away)
+            self.backdrop.backgroundColor = .clear
             Self.layoutStack(in: window)
         }
         guard animates, !UIAccessibility.isReduceMotionEnabled else {
@@ -261,6 +268,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
             let depth = CGFloat(sheets.count - 1 - index)
             sheet.place(depth == 0 ? frontRect : deck.card(resting: sheet.restRect, behind: frontRect, depth: depth - shift))
             sheet.card.alpha = depth > deck.visibleDepth ? 0 : 1
+            sheet.backdrop.backgroundColor = index == 0 ? UIColor.black.withAlphaComponent(dimming) : .clear
         }
     }
 

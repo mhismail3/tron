@@ -21,6 +21,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.tronPadSheetScene) private var padScene
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     private var fitHeight: CGFloat? {
         guard !opensLarge, padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
@@ -55,7 +56,8 @@ private struct TronContentFitSheetModifier: ViewModifier {
                     if next, settled == nil { opensLarge = true }
                 }
             }
-            .background { TronSheetTargetReporter(target: fitHeight.map { .fit($0) } ?? .large, dismiss: dismiss) }
+            .background { TronSheetTargetReporter(target: fitHeight.map { .fit($0) } ?? .large, dismiss: dismiss,
+                                                   style: colorScheme == .dark ? .dark : .light) }
             .modifier(TronSheetCover())
     }
 }
@@ -73,10 +75,12 @@ private struct TronSheetCover: ViewModifier {
 private struct TronSheetTargetReporter: UIViewControllerRepresentable {
     let target: TronSheetTarget
     let dismiss: DismissAction
+    let style: UIUserInterfaceStyle
 
     final class Controller: UIViewController {
         var target = TronSheetTarget.large
         var dismiss: DismissAction?
+        var style = UIUserInterfaceStyle.unspecified
 
         override func didMove(toParent parent: UIViewController?) {
             super.didMove(toParent: parent)
@@ -93,6 +97,7 @@ private struct TronSheetTargetReporter: UIViewControllerRepresentable {
             while let parent = root.parent { root = parent }
             guard root.presentingViewController != nil, let sheet = TronSheetStage.stage(of: root) else { return }
             sheet.dismissAction = dismiss
+            sheet.appearance(style)
             sheet.presentationDidEnd()
             sheet.contentTarget(target)
         }
@@ -108,6 +113,7 @@ private struct TronSheetTargetReporter: UIViewControllerRepresentable {
     func updateUIViewController(_ controller: Controller, context: Context) {
         controller.target = target
         controller.dismiss = dismiss
+        controller.style = style
         controller.report()
     }
 }
