@@ -134,6 +134,8 @@ export class HomeOwner {
   private readonly inbox: WakeInboxOwner;
   private wakeRequested = false;
   private wakeDrain: Promise<void> | undefined;
+  private disposed = false;
+  private retiredMemory: Promise<unknown> = Promise.resolve();
   private lastWakeDelivered = false;
 
   constructor(private readonly options: HomeOwnerOptions) {
@@ -548,6 +550,7 @@ export class HomeOwner {
   }
 
   private requestWake(): void {
+    if (this.disposed) return;
     this.wakeRequested = true;
     this.wakeDrain ??= this.drainWakes().catch(() => {
       this.wakeRequested = false;
@@ -557,7 +560,7 @@ export class HomeOwner {
 
   private async drainWakes(): Promise<void> {
     try {
-      while (this.wakeRequested) {
+      while (this.wakeRequested && !this.disposed) {
         this.wakeRequested = false;
         if (await this.wakeOnce() === "busy") return;
       }
@@ -1270,12 +1273,15 @@ export class HomeOwner {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     this.policies.clear();
     this.tasks.disposeTimers();
     await this.tasks.commands.dispose();
+    await this.wakeDrain;
     const memory = this.memory;
     this.memory = undefined;
     await memory?.owner.dispose();
+    await this.retiredMemory;
   }
 
   private async memoryView(activation: HomeActivationIdentity, signal: AbortSignal | undefined): Promise<HomeActivationView> {
@@ -1349,8 +1355,9 @@ export class HomeOwner {
 
   private ownerFor(homeId: string): HomeMemory {
     const current = this.memory;
+    if (this.disposed) throw new HomeMemoryRefusal("memory-unavailable", "Tron Home was disposed");
     if (current && current.sessionId === homeId) return current.owner;
-    if (current) void current.owner.dispose();
+    if (current) this.retiredMemory = Promise.all([this.retiredMemory, current.owner.dispose().catch(() => {})]);
     const source = () => this.readHomeSource();
     const proofs = new HomeSourceProofs();
     const owner = new HomeMemory({

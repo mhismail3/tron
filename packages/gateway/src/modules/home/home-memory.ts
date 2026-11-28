@@ -101,6 +101,7 @@ export class HomeMemory {
   private summarizer: EpisodicSummarizer | undefined;
   private binding: MemoryBinding | undefined;
   private failure: HomeMemoryIngestFailure | undefined;
+  private disposed = false;
   private readonly mutex = new AsyncMutex();
 
   constructor(private readonly options: HomeMemoryOptions) {}
@@ -217,6 +218,7 @@ export class HomeMemory {
   }
 
   async dispose(): Promise<void> {
+    this.disposed = true;
     await this.mutex.run(() => this.closeLocked());
     this.config = undefined;
     this.summarizer = undefined;
@@ -335,6 +337,7 @@ export class HomeMemory {
   }
 
   private async openStore(modelChanged: boolean): Promise<MemoryBinding> {
+    if (this.disposed) throw new HomeMemoryRefusal("memory-unavailable", "Home memory was disposed");
     const summarizer = this.summarizer;
     const config = this.config;
     if (!summarizer || !config) throw new HomeMemoryRefusal("memory-not-configured", "Home memory is not configured");
