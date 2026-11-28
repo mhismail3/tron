@@ -169,6 +169,17 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testNestedSheetOverALargeParentFitsItsOwnContent() async throws {
+        try await mounted(["-tron-home-dashboard-fixture", "-home-shell-ready", "-home-browser-loading"]) { app in
+            try await openManageHome(app)
+            try await app.activate("home-manage-memory-browser")
+            try await app.until("the memory list loads") { app.element("home-memory-row-39") != nil }
+            try await app.waitForTopSheetToSettle()
+            XCTAssertEqual(sheetChain(app).last?.sheetPresentationController?.detents.map(\.identifier), [.large], "the memory list is a Large parent")
+            try await assertNested(app, "memory-item-over-large-list") { try await app.activate("home-memory-row-39") }
+        }
+    }
+
     func testEditingTheProviderKeyKeepsTheFittedHeight() async throws {
         try await mounted(["-tron-ask-user-fixture", "-tron-provider-key-fixture"]) { app in
             try await app.until("the provider-key review") { app.element("change-review-secret") != nil }
