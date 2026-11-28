@@ -199,10 +199,18 @@ index 9673ba6a84a593d3a87d07a29649a747bf18c981..14923bf16c047983528f92207341e315
  		modelRuntime: options.services.modelRuntime,
  		settingsManager: options.services.settingsManager,
 diff --git a/packages/coding-agent/src/core/agent-session.ts b/packages/coding-agent/src/core/agent-session.ts
-index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82f1b6fa9d 100644
+index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..38e6ec828f84630ae1718251c5715d79fc1f16b7 100644
 --- a/packages/coding-agent/src/core/agent-session.ts
 +++ b/packages/coding-agent/src/core/agent-session.ts
-@@ -141,11 +141,14 @@ import {
+@@ -25,6 +25,7 @@ import {
+ 	type AgentState,
+ 	type AgentTool,
+ 	type AgentToolCallOutcome,
++	type AgentToolResult,
+ 	type BeforeToolCallContext,
+ 	type BeforeToolCallResult,
+ 	type PrepareNextTurnContext,
+@@ -141,11 +142,14 @@ import {
  import type { SlashCommandInfo } from "./slash-commands.ts";
  import { BUILTIN_PATH_PREFIX, createSyntheticSourceInfo, isSyntheticPath, type SourceInfo } from "./source-info.ts";
  import {
@@ -217,7 +225,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  } from "./system-prompt.ts";
  import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
  import { createAllToolDefinitions } from "./tools/index.ts";
-@@ -264,10 +267,15 @@ function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<str
+@@ -264,10 +268,15 @@ function withoutDeletedHeaders(headers: ProviderHeaders | undefined): Record<str
  }
  
  export interface AgentSessionConfig {
@@ -233,7 +241,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  	/** Models to cycle through with Ctrl+P (from --models flag) */
  	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
  	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
-@@ -470,6 +478,7 @@ export class AgentSession {
+@@ -470,6 +479,7 @@ export class AgentSession {
  	private _customTools: ToolDefinition[];
  	private _baseToolDefinitions: Map<string, ToolDefinition> = new Map();
  	private _cwd: string;
@@ -241,7 +249,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  	private _extensionRunnerRef?: { current?: ExtensionRunner };
  	private _initialActiveToolNames?: string[];
  	/**
-@@ -515,11 +524,17 @@ export class AgentSession {
+@@ -515,11 +525,17 @@ export class AgentSession {
  	private _toolPromptSnippets: Map<string, string> = new Map();
  	private _toolPromptGuidelines: Map<string, string[]> = new Map();
  
@@ -259,7 +267,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  		this.agent = config.agent;
  		this.sessionManager = config.sessionManager;
  		this.settingsManager = config.settingsManager;
-@@ -527,6 +542,7 @@ export class AgentSession {
+@@ -527,6 +543,7 @@ export class AgentSession {
  		this._resourceLoader = config.resourceLoader;
  		this._customTools = config.customTools ?? [];
  		this._cwd = config.cwd;
@@ -267,7 +275,56 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  		this._modelRuntime = config.modelRuntime;
  		this._cacheWarmer = config.cacheWarmer;
  		if (this._cacheWarmer) {
-@@ -970,26 +986,13 @@ export class AgentSession {
+@@ -952,7 +969,9 @@ export class AgentSession {
+ 		const previousFinishTurn = this.agent.finishTurn;
+ 		this.agent.finishTurn = async (turn, signal) => {
+ 			this._boundaryDispatchedMessages.add(turn.message);
+-			const extensionContinue = await this._dispatchTurnEndBoundary(turn.message, turn.toolResults);
++			const toolResults =
++				turn.message.stopReason === "aborted" ? this._settleAbortedToolCalls(turn.message) : turn.toolResults;
++			const extensionContinue = await this._dispatchTurnEndBoundary(turn.message, toolResults);
+ 			const previousDecision = await previousFinishTurn?.(turn, signal);
+ 			if (previousDecision?.action === "end") return previousDecision;
+ 			if (extensionContinue || previousDecision?.action === "continue") return { action: "continue" };
+@@ -960,6 +979,37 @@ export class AgentSession {
+ 		};
+ 	}
+ 
++	/** Records the result each call of an aborted response already reached, as its tool's settleAborted reports. */
++	private _settleAbortedToolCalls(message: AssistantMessage): ToolResultMessage[] {
++		const results: ToolResultMessage[] = [];
++		for (const block of message.content) {
++			if (block.type !== "toolCall") continue;
++			const settle = this._toolDefinitions.get(block.name)?.definition.settleAborted;
++			let settled: AgentToolResult<any> | undefined;
++			try {
++				settled = settle?.(block.id, block.arguments);
++			} catch {
++				settled = undefined;
++			}
++			if (!settled) continue;
++			const result: ToolResultMessage = {
++				role: "toolResult",
++				toolCallId: block.id,
++				toolName: block.name,
++				content: settled.content ?? [],
++				details: settled.details,
++				isError: settled.isError === true,
++				timestamp: Date.now(),
++			};
++			this.sessionManager.appendMessage(result);
++			this._emit({ type: "message_start", message: result });
++			this._emit({ type: "message_end", message: result });
++			results.push(result);
++		}
++		if (results.length > 0) this._refreshFinalizedContext();
++		return results;
++	}
++
+ 	private _installAgentNextTurnRefresh(): void {
+ 		const previousPrepareNextTurnWithContext =
+ 			this.agent.prepareNextTurnWithContext ??
+@@ -970,26 +1020,13 @@ export class AgentSession {
  			const context = await this._compactBeforeNextAssistantResponse(turn.context);
  			const previousSnapshot = await previousPrepareNextTurnWithContext?.({ ...turn, context }, signal);
  			const nextContext = previousSnapshot?.context ?? context;
@@ -295,7 +352,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  				model: this.agent.state.model,
  				thinkingLevel: this.agent.state.thinkingLevel,
  			};
-@@ -1554,9 +1557,17 @@ export class AgentSession {
+@@ -1554,9 +1591,17 @@ export class AgentSession {
  		return !this._isAgentRunActive && !this.isCompacting;
  	}
  
@@ -315,7 +372,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  	}
  
  	/** Current retry attempt (0 if not retrying) */
-@@ -1607,13 +1618,15 @@ export class AgentSession {
+@@ -1607,13 +1652,15 @@ export class AgentSession {
  	setActiveToolsByName(toolNames: string[]): void {
  		const previous = this.getActiveToolNames();
  		this._setActiveTools(toolNames);
@@ -336,7 +393,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  		}
  	}
  
-@@ -1811,6 +1824,9 @@ export class AgentSession {
+@@ -1811,6 +1858,9 @@ export class AgentSession {
  		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
  
  		this._baseSystemPromptOptions = normalizeBuildSystemPromptOptions({
@@ -346,7 +403,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  			cwd: this._cwd,
  			skills: loadedSkills,
  			contextFiles: loadedContextFiles,
-@@ -1833,15 +1849,12 @@ export class AgentSession {
+@@ -1833,15 +1883,12 @@ export class AgentSession {
  	 * and persisted, and the forced text is projected onto the request by
  	 * {@link _installAgentForcedPromptProjection}.
  	 */
@@ -364,7 +421,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  			buildSystemPromptSections(options),
  		);
  		return sections ? { role: "system", content: "", sections, timestamp: Date.now() } : undefined;
-@@ -1891,7 +1904,7 @@ export class AgentSession {
+@@ -1891,7 +1938,7 @@ export class AgentSession {
  			const current = getCurrentSystemMessage(transformed);
  			const head: SystemMessage = {
  				role: "system",
@@ -373,7 +430,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  				...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
  				timestamp: current?.timestamp ?? Date.now(),
  			};
-@@ -1961,8 +1974,13 @@ export class AgentSession {
+@@ -1961,8 +2008,13 @@ export class AgentSession {
  		let messages: AgentMessage[];
  		try {
  			messages = await this._prepareRun(trigger);
@@ -387,7 +444,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  			this._flushPendingBashMessages();
  			this._flushPendingCustomMessages();
  			this._resolveIdleWaitIfIdle();
-@@ -1972,7 +1990,6 @@ export class AgentSession {
+@@ -1972,7 +2024,6 @@ export class AgentSession {
  		// have while idle. No run exists yet, so they cannot split a tool call from its result.
  		this._flushPendingBashMessages();
  		this._flushPendingCustomMessages();
@@ -395,7 +452,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  
  		// Compaction before the prompt may have scheduled a retry; the new prompt replaces it.
  		this._failedResponse = undefined;
-@@ -2606,6 +2623,11 @@ export class AgentSession {
+@@ -2606,6 +2657,11 @@ export class AgentSession {
  		return this._followUpMessages;
  	}
  
@@ -407,7 +464,7 @@ index 6a89c5b4133628bf1b39483b7af35d7fb6c26833..02c2477d75eec05b875fba0c730c9e82
  	get resourceLoader(): ResourceLoader {
  		return this._resourceLoader;
  	}
-@@ -3811,6 +3833,7 @@ export class AgentSession {
+@@ -3811,6 +3867,7 @@ export class AgentSession {
  			this._cwd,
  			this.sessionManager,
  			new ModelRegistry(this._modelRuntime),
@@ -464,7 +521,7 @@ index 937c9331385f7919d4cfab47063307d0af58bc7f..dbfed62ef12c0c472bf097184ea97185
  			{},
  			Object.getOwnPropertyDescriptors(this.createContext()),
 diff --git a/packages/coding-agent/src/core/extensions/types.ts b/packages/coding-agent/src/core/extensions/types.ts
-index 9bcf4d25e6132bfb3ccc86288eb42beb4689210e..551bdabe2a4235db786639a61a87153e16955c3e 100644
+index 9bcf4d25e6132bfb3ccc86288eb42beb4689210e..dfa822d2b16bc9f248d065f022ae39ed46bea69b 100644
 --- a/packages/coding-agent/src/core/extensions/types.ts
 +++ b/packages/coding-agent/src/core/extensions/types.ts
 @@ -352,6 +352,11 @@ export interface ExtensionContext {
@@ -479,6 +536,21 @@ index 9bcf4d25e6132bfb3ccc86288eb42beb4689210e..551bdabe2a4235db786639a61a87153e
  	/** Session manager (read-only) */
  	sessionManager: ReadonlySessionManager;
  	/** Model registry for API key resolution */
+@@ -667,6 +672,14 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
+ 	 */
+ 	executionMode?: ToolExecutionMode;
+ 
++	/**
++	 * For a tool whose calls show work done elsewhere (for example by a provider that runs its own tools):
++	 * the result a call already reached when the response that issued it ended aborted, or undefined when
++	 * it had not finished. Pi never executes calls of an aborted response; a call without a settled result
++	 * stays interrupted. Settled results are kept in the session but never sent to a model.
++	 */
++	settleAborted?: (toolCallId: string, params: Static<TParams>) => AgentToolResult<TDetails> | undefined;
++
+ 	/** Execute the tool. */
+ 	execute(
+ 		toolCallId: string,
 diff --git a/packages/coding-agent/src/core/mcp-servers.ts b/packages/coding-agent/src/core/mcp-servers.ts
 index 002cf56f519490522d81ab1f1f09fc8cc3d304f9..ca3dce659d3703719734a926894367c5ad56f479 100644
 --- a/packages/coding-agent/src/core/mcp-servers.ts
@@ -555,6 +627,39 @@ index 002cf56f519490522d81ab1f1f09fc8cc3d304f9..ca3dce659d3703719734a926894367c5
  }
  
  /** A server an extension registered with `pi.registerMcpServer()`. */
+diff --git a/packages/coding-agent/src/core/messages.ts b/packages/coding-agent/src/core/messages.ts
+index 0641176eb48ed5fca52f61131b70fe87bd78634b..e5bc3f74fb4ed6d4b36ed42b68328e66aa08471f 100644
+--- a/packages/coding-agent/src/core/messages.ts
++++ b/packages/coding-agent/src/core/messages.ts
+@@ -146,6 +146,15 @@ export function createCustomMessage(
+  * - Custom extensions and tools
+  */
+ export function convertToLlm(messages: AgentMessage[]): Message[] {
++	// Results settled for calls of an aborted or failed response are kept for display only; the
++	// response itself is never replayed, so they would be orphans.
++	const unsent = new Set(
++		messages.flatMap((m) =>
++			m.role === "assistant" && (m.stopReason === "aborted" || m.stopReason === "error")
++				? m.content.flatMap((block) => (block.type === "toolCall" ? [block.id] : []))
++				: [],
++		),
++	);
+ 	return messages
+ 		.map((m): Message | undefined => {
+ 			switch (m.role) {
+@@ -181,10 +190,11 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
+ 						],
+ 						timestamp: m.timestamp,
+ 					};
++				case "toolResult":
++					return unsent.has(m.toolCallId) ? undefined : m;
+ 				case "system":
+ 				case "user":
+ 				case "assistant":
+-				case "toolResult":
+ 					return m;
+ 				default:
+ 					// biome-ignore lint/correctness/noSwitchDeclarations: fine
 diff --git a/packages/coding-agent/src/core/model-config.ts b/packages/coding-agent/src/core/model-config.ts
 index 200cdeec0e18d6c0cc461bb93153cea6535f2ba8..c15ca7c40b4ea7f920e208a75264a3a94ed49e3e 100644
 --- a/packages/coding-agent/src/core/model-config.ts
@@ -2915,6 +3020,101 @@ index 31f8713c2eaed0a234e4458fdc7bedb3fa48cf6f..0efb1d945fb1e7bcae2a662ebcde85c1
  			agentDir: harness.tempDir,
  			modelRuntime: harness.session.modelRuntime,
  			settingsManager: harness.settingsManager,
+diff --git a/packages/coding-agent/test/suite/regressions/aborted-display-only-outcome.test.ts b/packages/coding-agent/test/suite/regressions/aborted-display-only-outcome.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..92243cdc428f645e1c4cbff1c7138809307c9ee9
+--- /dev/null
++++ b/packages/coding-agent/test/suite/regressions/aborted-display-only-outcome.test.ts
+@@ -0,0 +1,89 @@
++import type { Context } from "@earendil-works/pi-ai";
++import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
++import { Type } from "typebox";
++import { afterEach, describe, expect, it } from "vitest";
++import { createHarness, type Harness } from "../harness.ts";
++
++// Tron: a provider that runs its own tools reports each one as a call of a display-only tool. When the
++// user cancels, the response ends aborted, and Pi recorded no result for any of its calls, so clients
++// showed calls that had finished as failed. A tool's settleAborted now records the outcome a call already
++// reached; unfinished calls and other tools stay without a result (interrupted), nothing executes, and
++// none of it reaches the next request.
++describe("aborted response with display-only tool calls", () => {
++	const harnesses: Harness[] = [];
++	afterEach(() => {
++		while (harnesses.length > 0) harnesses.pop()?.cleanup();
++	});
++
++	it("records each display-only outcome and keeps them out of the next request", async () => {
++		const ran: string[] = [];
++		const harness = await createHarness({
++			extensionFactories: [
++				(pi) => {
++					pi.registerTool({
++						name: "shown",
++						label: "Shown",
++						description: "Shows a call made elsewhere",
++						parameters: Type.Object({ state: Type.String() }),
++						execute: async () => {
++							ran.push("shown");
++							return { content: [], details: {} };
++						},
++						settleAborted: (_id, params) =>
++							params.state === "running"
++								? undefined
++								: {
++										content: [{ type: "text", text: `reported ${params.state}` }],
++										details: { status: params.state },
++										isError: params.state === "failed",
++									},
++					});
++					pi.registerTool({
++						name: "real",
++						label: "Real",
++						description: "Does work",
++						parameters: Type.Object({}),
++						execute: async () => {
++							ran.push("real");
++							return { content: [{ type: "text", text: "ran" }], details: {} };
++						},
++					});
++				},
++			],
++		});
++		harnesses.push(harness);
++		let nextContext: Context | undefined;
++		harness.setResponses([
++			fauxAssistantMessage(
++				[
++					fauxToolCall("shown", { state: "completed" }, { id: "done-1" }),
++					fauxToolCall("shown", { state: "failed" }, { id: "failed-1" }),
++					fauxToolCall("shown", { state: "running" }, { id: "running-1" }),
++					fauxToolCall("real", {}, { id: "real-1" }),
++				],
++				{ stopReason: "aborted", errorMessage: "Request was aborted" },
++			),
++			(context) => {
++				nextContext = context;
++				return fauxAssistantMessage("next");
++			},
++		]);
++
++		await harness.session.prompt("first");
++		const results = harness.session.messages.filter((message) => message.role === "toolResult");
++		expect(results.map((result) => [result.toolCallId, result.isError, result.content])).toEqual([
++			["done-1", false, [{ type: "text", text: "reported completed" }]],
++			["failed-1", true, [{ type: "text", text: "reported failed" }]],
++		]);
++		expect(ran).toEqual([]);
++		const persisted = harness.sessionManager
++			.getBranch()
++			.flatMap((entry) =>
++				entry.type === "message" && entry.message.role === "toolResult" ? [entry.message.toolCallId] : [],
++			);
++		expect(persisted).toEqual(["done-1", "failed-1"]);
++
++		await harness.session.prompt("second");
++		expect(nextContext?.messages.some((message) => message.role === "toolResult")).toBe(false);
++	});
++});
 diff --git a/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts b/packages/coding-agent/test/suite/regressions/preflight-started-revoke.test.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..199f0930c9bd13c8d16bfafc02d97b2e2f4d399a
