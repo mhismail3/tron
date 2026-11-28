@@ -736,7 +736,7 @@ describe("Tron Home memory tools end to end", { concurrent: false }, () => {
     const row = { late, storeRecreated: await stat(store).then(() => true, () => false) };
     report.cases.push({ case: "disposed", ...row });
     expect(row).toEqual({ late: "refused", storeRecreated: false });
-  }, 120_000);
+  });
 
   it("reconfigures the memory while a commit is still ingesting it", async () => {
     const f = await fixture("race");
