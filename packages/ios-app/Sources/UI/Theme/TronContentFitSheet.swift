@@ -18,22 +18,15 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @State private var settled: CGFloat?
     @State private var loading = false
     @State private var opensLarge = false
-    @State private var appeared = false
-    @State private var keyboard: CGFloat = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.tronPadSheetScene) private var padScene
+    @Environment(\.dismiss) private var dismiss
 
     private var fitHeight: CGFloat? {
         guard !opensLarge, padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
-        let window = TronSheetWindowMetrics.current
         guard let content = loading ? settled : measured else { return nil }
-        let height = (content - window.bottomInset + keyboard).rounded(.up)
-        return height < window.maximumDetent ? height : nil
-    }
-
-    private var target: TronSheetDetentDriver.Target {
-        fitHeight.map { .fit($0) } ?? .large
+        let height = content.rounded(.up)
+        return height < TronSheetPresentationController.maximumHeight ? height : nil
     }
 
     private func update(_ change: () -> Void) {
@@ -62,67 +55,36 @@ private struct TronContentFitSheetModifier: ViewModifier {
                     if next, settled == nil { opensLarge = true }
                 }
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
-                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
-                update { keyboard = TronSheetWindowMetrics.keyboardLift(frame) }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                update { keyboard = 0 }
-            }
-            .onAppear { appeared = true }
-            .background { TronSheetDetentDriver(target: target, animated: appeared && !reduceMotion) }
+            .background { TronSheetTargetReporter(target: fitHeight.map { .fit($0) } ?? .large, dismiss: dismiss) }
             .presentationDragIndicator(.hidden)
     }
 }
 
-private struct TronSheetDetentDriver: UIViewControllerRepresentable {
-    enum Target: Equatable { case fit(CGFloat), large }
-    let target: Target
-    let animated: Bool
+private struct TronSheetTargetReporter: UIViewControllerRepresentable {
+    let target: TronSheetTarget
+    let dismiss: DismissAction
 
     final class Controller: UIViewController {
-        var target = Target.large
-        var animated = false
-        private var applied: Target?
-        private static let appliedByRoot = NSMapTable<UIViewController, Box>.weakToStrongObjects()
-        private final class Box { let target: Target; init(_ target: Target) { self.target = target } }
+        var target = TronSheetTarget.large
+        var dismiss: DismissAction?
+
+        override func didMove(toParent parent: UIViewController?) {
+            super.didMove(toParent: parent)
+            report()
+        }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
-            apply()
+            report()
         }
 
-        override func viewDidAppear(_ animated: Bool) {
-            super.viewDidAppear(animated)
-            apply()
-        }
-
-        private func floored(_ target: Target, under presenter: Target?) -> Target {
-            switch (target, presenter) {
-            case (.fit(let height), .fit(let floor)): .fit(max(height, floor))
-            case (.fit, .large): .large
-            default: target
-            }
-        }
-
-        func apply() {
+        func report() {
             var root: UIViewController = self
             while let parent = root.parent { root = parent }
-            guard !root.isBeingDismissed, root.presentedViewController == nil, let sheet = root.sheetPresentationController else { return }
-            let target = floored(target, under: root.presentingViewController.flatMap { Self.appliedByRoot.object(forKey: $0)?.target })
-            Self.appliedByRoot.setObject(Box(target), forKey: root)
-            let detent: UISheetPresentationController.Detent = switch target {
-            case .fit(let height): .custom(identifier: .init("tron.content-fit")) { _ in height }
-            case .large: .large()
-            }
-            guard applied != target || sheet.detents.map(\.identifier) != [detent.identifier] else { return }
-            let first = applied == nil
-            applied = target
-            let change = {
-                sheet.detents = [detent]
-                sheet.selectedDetentIdentifier = detent.identifier
-            }
-            if animated, !first, !root.isBeingPresented { sheet.animateChanges(change) } else { change() }
+            guard root.presentingViewController != nil,
+                  let sheet = root.presentationController as? TronSheetPresentationController else { return }
+            sheet.dismissAction = dismiss
+            sheet.contentTarget(target)
         }
     }
 
@@ -135,33 +97,8 @@ private struct TronSheetDetentDriver: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: Controller, context: Context) {
         controller.target = target
-        controller.animated = animated
-        controller.apply()
-        DispatchQueue.main.async { controller.apply() }
-    }
-}
-
-private struct TronSheetWindowMetrics {
-    let bottomInset: CGFloat
-    let maximumDetent: CGFloat
-
-    @MainActor static var current: TronSheetWindowMetrics {
-        guard let window = UIApplication.shared.connectedScenes
-            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else {
-            return TronSheetWindowMetrics(bottomInset: 0, maximumDetent: .infinity)
-        }
-        let insets = window.safeAreaInsets
-        return TronSheetWindowMetrics(bottomInset: insets.bottom,
-                                      maximumDetent: window.bounds.height - insets.top - insets.bottom)
-    }
-
-    @MainActor static func keyboardLift(_ screenFrame: CGRect) -> CGFloat {
-        guard let window = UIApplication.shared.connectedScenes
-            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return 0 }
-        let frame = window.convert(screenFrame, from: window.screen.coordinateSpace)
-        let bottom = window.bounds.maxY
-        guard frame.maxY >= bottom - 0.5 else { return 0 }
-        return max(bottom - frame.minY - window.safeAreaInsets.bottom, 0)
+        controller.dismiss = dismiss
+        controller.report()
     }
 }
 
@@ -175,7 +112,7 @@ struct TronSheetFitScrollModifier: ViewModifier {
             content
                 .environment(\.tronSheetMeasuresContent, false)
                 .ignoresSafeArea(.container, edges: .bottom)
-                .contentMargins(.bottom, fits ? 0 : TronSheetWindowMetrics.current.bottomInset)
+                .contentMargins(.bottom, fits ? 0 : TronSheetPresentationController.bottomSafeArea)
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .scrollClipDisabled(fits)
                 .onScrollGeometryChange(for: CGFloat?.self) { geometry in

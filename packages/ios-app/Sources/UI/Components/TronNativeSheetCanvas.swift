@@ -95,7 +95,10 @@ private struct NativeSheetCanvasContent: View {
 private final class NativeSheetHostingController: UIHostingController<NativeSheetCanvasContent> {
     override func present(_ presented: UIViewController, animated: Bool, completion: (() -> Void)? = nil) {
         if let window = view.window { TronPadSheetMode.prepare(presented, in: window) }
-        super.present(presented, animated: animated, completion: completion)
+        guard presented is UIHostingController<AnyView>, TronPadSheetMode.resolve(sceneWidth: view.window?.bounds.width ?? 0) == nil else {
+            return super.present(presented, animated: animated, completion: completion)
+        }
+        super.present(TronSheetContainer(wrapping: presented), animated: animated, completion: completion)
     }
 }
 

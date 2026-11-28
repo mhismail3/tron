@@ -183,12 +183,13 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
             try await app.until("Settings opens") { sheetChain(app).count == 1 }
             try await app.waitForTopSheetToSettle()
             _ = try await revealed(app, "settings-link-Connections")
+            let parentStart = rendered(sheetChain(app)[0])
             try await app.activate("settings-link-Connections")
             try await app.until("Connections over Settings") { sheetChain(app).count == 2 }
             try await app.waitForTopSheetToSettle()
             let drag = try XCTUnwrap(HostedPresentationProbe.sheetDrag, "the sheet presenter takes drags")
             let parent = sheetChain(app)[0], child = sheetChain(app)[1]
-            let parentStart = rendered(parent), childStart = rendered(child)
+            let childStart = rendered(child)
             UIView.setAnimationsEnabled(true)
             defer { UIView.setAnimationsEnabled(false) }
             drag(child, .began, 0, 0)
@@ -317,28 +318,34 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
                 MountedFixture.elements(in: parent.view).filter { MountedFixture.identifier($0) == "tron-sheet-surface" }
                     .map(\.accessibilityFrame).max { $0.maxY < $1.maxY }
             }
-            let startCard = try XCTUnwrap(bottomCard(), "the bottom card")
+            @MainActor func laidOut(_ card: CGRect) -> CGFloat {
+                card.height * parent.view.bounds.height / parent.view.convert(parent.view.bounds, to: nil).height
+            }
+            let startCard = laidOut(try XCTUnwrap(bottomCard(), "the bottom card"))
             var ys: [CGFloat] = [], cards: [CGFloat] = []
             UIView.setAnimationsEnabled(true)
             defer { UIView.setAnimationsEnabled(false) }
             try await app.activate("Technical details")
-            var closed = false
+            var closedAt: Int?
             for index in 0..<200 {
                 let layer = parent.view.layer.presentation() ?? parent.view.layer
-                ys.append(layer.convert(layer.bounds, to: nil).minY)
-                if let card = bottomCard() { cards.append(card.height) }
-                if !closed, index > 40, sheetChain(app).count == 2 { try await app.activate("Done"); closed = true }
+                let frame = layer.convert(layer.bounds, to: nil)
+                ys.append(frame.minY)
+                if let card = bottomCard() { cards.append(laidOut(card)) }
+                if closedAt == nil, index > 40, sheetChain(app).count == 2 { try await app.activate("Done"); closedAt = index }
                 await MountedFixture.nextFrame()
             }
             let trace = "PARENT_TRACE " + ys.enumerated().filter { $0.offset == 0 || abs($0.element - ys[$0.offset - 1]) > 0.25 }
                 .map { "\($0.offset):\(Int($0.element))" }.joined(separator: " ")
             print(trace)
-            let deltas = zip(ys, ys.dropFirst()).map { $1 - $0 }.filter { abs($0) > 0.5 }
-            let reversals = zip(deltas, deltas.dropFirst()).filter { ($0 > 0) != ($1 > 0) }.count
-            XCTAssertTrue(closed, "the subsheet closed")
-            XCTAssertEqual(reversals, 0, "The sheet under a subsheet moves monotonically, never up-down-up\n\(trace)")
+            let close = try XCTUnwrap(closedAt, "the subsheet closed")
+            for phase in [Array(ys[..<close]), Array(ys[close...])] {
+                let deltas = zip(phase, phase.dropFirst()).map { $1 - $0 }.filter { abs($0) > 0.5 }
+                XCTAssertTrue(zip(deltas, deltas.dropFirst()).allSatisfy { ($0 > 0) == ($1 > 0) },
+                              "The sheet under a subsheet steps back in one move and returns in one move, never up-down-up\n\(trace)")
+            }
             XCTAssertEqual(ys.last!, ys.first!, accuracy: 0.5, "The sheet under a subsheet returns to its own height\n\(trace)")
-            XCTAssertTrue(cards.allSatisfy { abs($0 - startCard.height) <= 0.5 },
+            XCTAssertTrue(cards.allSatisfy { abs($0 - startCard) <= 0.5 },
                           "The bottom card keeps its laid-out height on every frame: \(Set(cards.map { Int($0) }).sorted())")
         }
     }
