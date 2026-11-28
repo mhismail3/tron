@@ -22,6 +22,7 @@ private struct TronContentFitSheetModifier: ViewModifier {
     @Environment(\.tronPadSheetScene) private var padScene
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @State private var keyboard: CGFloat = 0
 
     private var fitHeight: CGFloat? {
         guard !opensLarge, padScene?.mode == nil, !dynamicTypeSize.isAccessibilitySize else { return nil }
@@ -58,16 +59,26 @@ private struct TronContentFitSheetModifier: ViewModifier {
             }
             .background { TronSheetTargetReporter(target: fitHeight.map { .fit($0) } ?? .large, dismiss: dismiss,
                                                    style: colorScheme == .dark ? .dark : .light) }
-            .modifier(TronSheetCover())
+            .modifier(TronSheetCover(fit: fitHeight.map { $0 - TronSheetStage.bottomSafeArea + keyboard }))
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+                guard !TronSheetStage.isEnabled else { return }
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+                update { keyboard = TronSheetStage.keyboardLift(frame) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                update { keyboard = 0 }
+            }
     }
 }
 
 private struct TronSheetCover: ViewModifier {
+    let fit: CGFloat?
+
     func body(content: Content) -> some View {
         if TronSheetStage.isEnabled {
             content.presentationCompactAdaptation(.fullScreenCover).presentationBackground(.clear)
         } else {
-            content.presentationDragIndicator(.hidden)
+            content.presentationDetents([fit.map { .height($0.rounded(.up)) } ?? .large]).presentationDragIndicator(.hidden)
         }
     }
 }

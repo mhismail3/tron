@@ -85,7 +85,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
 - **Presentation haptics.** Managed sheets (including nested sheets)
   and system pickers play one medium, full-intensity impact through `TronHaptics`, respecting System Haptics.
   Semantic interaction patterns and exclusions are in the [UI haptic map](../Sources/UI/README.md#haptic-map).
-  Presenters adopt already-presented state silently; detent changes, replacements, re-renders and
+  Presenters adopt already-presented state silently; height changes, replacements, re-renders and
   dismissals do not tap. The question interaction keeps only its existing live attention cue;
   state-driven onboarding and pending editor confirmations remain silent across launch/reconnect.
 - **Toolbar tint.** Every sheet a row opens inherits its card's accent through
@@ -124,7 +124,7 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   with the shared `TronLoadingPlaceholder` (the dashboard Usage skeleton) instead. Non-scroll sheets
   (media, terminal, camera) keep their own preparation surfaces.
 - **Chat details.** Provider-error and nested tool-call details reuse `ChatDetailSheet` for
-  navigation, Done, top chrome, insets and detents. Single errors and runs share one layout of
+  navigation, Done, top chrome, insets and sizing. Single errors and runs share one layout of
   standard groups: a summary row, then per occurrence (newest first) a details group (model, type,
   time, request ID, HTTP status rows) and a Message group with the full selectable text; runs add
   the Breakdown list. No disclosures or a lone container.
@@ -138,8 +138,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   there. A sheet's height never reaches the sheet that presented it. A pushed sheet is measured
   before it rises, so it opens at its final height.
   A child sheet opens over its parent at its own fitted height whatever the parent's size; the
-  sheets behind step back as a deck (`SheetDeck`: each card 10 pt narrower per side and peeking
-  12 pt above the one in front, each step back 0.62 of the one before, more than 6 back not drawn).
+  sheets behind step back as a deck (`SheetDeck`: the card just behind is 10 pt narrower per side and
+  peeks 12 pt above the front sheet, each further card adds 0.62 of the step before, so the deck is
+  at most about 32 pt high; more than 6 back are not drawn).
   A parent only scales and moves as a card; its laid-out size never changes, it is never tucked
   under the child, and closing the child springs it back. Dragging the front sheet down follows the
   finger at its own height and steps the deck forward with it; a short slow drag springs back, a
@@ -160,8 +161,9 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
   `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
   frame and fails on any overshoot or post-open move.
-- **iPad sheets.** On iPad managed sheets stay native system sheets; on iPadOS 27 `TronPadSheetMode`
-  sets their geometry. A scene at least 1100 pt wide (every full-screen landscape iPad)
+- **iPad sheets.** On iPad managed sheets stay native system sheets with one `.height` detent at the
+  measured content height (plus the keyboard's height above the bottom safe area), or `.large`; on
+  iPadOS 27 `TronPadSheetMode` sets their geometry. A scene at least 1100 pt wide (every full-screen landscape iPad)
   shows a full-height 420 pt trailing column without dimming; the scene or route surface that
   presented it reflows beside it, so the chat keeps taking taps and text, and a sheet opened from
   the column stacks on it in the same column. A narrower scene (portrait, split, windowed) shows

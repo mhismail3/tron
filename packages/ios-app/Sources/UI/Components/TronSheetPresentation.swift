@@ -50,10 +50,7 @@ private final class TronSheetTransition: NSObject, UIViewControllerAnimatedTrans
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
         guard let controller = context.viewController(forKey: presenting ? .to : .from),
-              let stage = TronSheetStage.stage(of: controller) else {
-            if presenting, let view = context.view(forKey: .to) { context.containerView.addSubview(view) }
-            return context.completeTransition(!context.transitionWasCancelled)
-        }
+              let stage = TronSheetStage.stage(of: controller) else { return context.completeTransition(false) }
         if presenting { stage.open(context) } else { stage.close(context) }
     }
 }
@@ -143,11 +140,6 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         UIView.performWithoutAnimation { Self.layoutStack(in: container.window) }
     }
 
-    func dismissalDidEnd() {
-        guard Self.live.contains(where: { $0 === self }) else { return }
-        retire()
-    }
-
     private func install(in containerView: UIView, content: UIView) {
         guard card.superview == nil else { return }
         self.containerView = containerView
@@ -164,6 +156,9 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
 
     private func retire() {
         let window = containerView?.window
+        NotificationCenter.default.removeObserver(self)
+        card.gestureRecognizers?.forEach(card.removeGestureRecognizer)
+        backdrop.gestureRecognizers?.forEach(backdrop.removeGestureRecognizer)
         card.removeFromSuperview()
         backdrop.removeFromSuperview()
         Self.live.removeAll { $0 === self }
@@ -275,6 +270,13 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
     static var maximumHeight: CGFloat {
         guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return .infinity }
         return cap(in: window.bounds, top: window.safeAreaInsets.top + deck.peek, keyboard: .infinity)
+    }
+
+    static func keyboardLift(_ screenFrame: CGRect) -> CGFloat {
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return 0 }
+        let frame = window.convert(screenFrame, from: window.screen.coordinateSpace)
+        guard frame.maxY >= window.bounds.maxY - 0.5 else { return 0 }
+        return max(window.bounds.maxY - frame.minY - window.safeAreaInsets.bottom, 0)
     }
 
     static var bottomSafeArea: CGFloat {

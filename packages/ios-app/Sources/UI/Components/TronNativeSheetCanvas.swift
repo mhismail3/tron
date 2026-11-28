@@ -110,10 +110,7 @@ private final class NativeSheetHostingController: UIHostingController<NativeShee
             return super.dismiss(animated: animated, completion: completion)
         }
         stage.animates = animated
-        super.dismiss(animated: true) {
-            stage.dismissalDidEnd()
-            completion?()
-        }
+        super.dismiss(animated: true, completion: completion)
     }
 }
 
