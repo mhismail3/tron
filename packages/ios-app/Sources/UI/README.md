@@ -99,7 +99,7 @@ The feature folders under `UI/` are their own modules with their own READMEs: [C
   `packages/ios-app/scripts/test-source-policy.sh`.
 - Managed sheets and system pickers dispatch one medium, full-intensity impact through
   `TronHaptics` on a live presentation, including nested sheets. Existing-at-mount sheets,
-  replacements, detent changes, re-renders and dismissals are silent. Question interactions
+  replacements, height changes, re-renders and dismissals are silent. Question interactions
   keep only their live attention cue; automatic onboarding and pending editor requests are silent.
 
 ## Haptic map

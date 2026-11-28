@@ -50,7 +50,7 @@ private final class TronSheetTransition: NSObject, UIViewControllerAnimatedTrans
 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
         guard let controller = context.viewController(forKey: presenting ? .to : .from),
-              let stage = TronSheetStage.stage(of: controller) else { return context.completeTransition(false) }
+              let stage = TronSheetStage.stage(of: controller) else { return context.completeTransition(!context.transitionWasCancelled) }
         if presenting { stage.open(context) } else { stage.close(context) }
     }
 }
@@ -157,6 +157,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
     private func retire() {
         let window = containerView?.window
         NotificationCenter.default.removeObserver(self)
+        pan.removeTarget(nil, action: nil)
         card.gestureRecognizers?.forEach(card.removeGestureRecognizer)
         backdrop.gestureRecognizers?.forEach(backdrop.removeGestureRecognizer)
         card.removeFromSuperview()
@@ -272,13 +273,6 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         return cap(in: window.bounds, top: window.safeAreaInsets.top + deck.peek, keyboard: .infinity)
     }
 
-    static func keyboardLift(_ screenFrame: CGRect) -> CGFloat {
-        guard let window = UIApplication.shared.connectedScenes.compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first else { return 0 }
-        let frame = window.convert(screenFrame, from: window.screen.coordinateSpace)
-        guard frame.maxY >= window.bounds.maxY - 0.5 else { return 0 }
-        return max(window.bounds.maxY - frame.minY - window.safeAreaInsets.bottom, 0)
-    }
-
     static var bottomSafeArea: CGFloat {
         UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first?.safeAreaInsets.bottom ?? 0
     }
@@ -289,11 +283,13 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         (min(bounds.maxY, keyboard) - inset - top) / scale(bounds)
     }
 
+    private var keyboardTop: CGFloat { isFront || phase != .shown ? Self.keyboardTop : .infinity }
+
     private var room: CGFloat { Self.deck.peek * Self.deck.steps(CGFloat(below)) }
 
     private var layoutHeight: CGFloat {
         guard let containerView else { return 0 }
-        let cap = Self.cap(in: containerView.bounds, top: containerView.safeAreaInsets.top + room, keyboard: Self.keyboardTop)
+        let cap = Self.cap(in: containerView.bounds, top: containerView.safeAreaInsets.top + room, keyboard: keyboardTop)
         return switch target {
         case .fit(let height): min(height, cap)
         case .large: cap
@@ -304,7 +300,7 @@ final class TronSheetStage: NSObject, UIGestureRecognizerDelegate {
         guard let containerView else { return .zero }
         let bounds = containerView.bounds
         let height = layoutHeight * Self.scale(bounds)
-        let bottom = min(bounds.maxY, Self.keyboardTop) - Self.inset
+        let bottom = min(bounds.maxY, keyboardTop) - Self.inset
         return CGRect(x: Self.inset, y: bottom - height, width: bounds.width - 2 * Self.inset, height: height)
     }
 

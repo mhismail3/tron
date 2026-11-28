@@ -161,9 +161,11 @@ Liquid Glass stay default iOS styling, never a second app-drawn container.
   Scrolls that fill their viewport (`TronFeedEmptyState`) or are nested opt out through
   `tronSheetMeasuresContent`. `ContentFitSheetViewTests` samples the presented frame per display
   frame and fails on any overshoot or post-open move.
-- **iPad sheets.** On iPad managed sheets stay native system sheets with one `.height` detent at the
-  measured content height (plus the keyboard's height above the bottom safe area), or `.large`; on
-  iPadOS 27 `TronPadSheetMode` sets their geometry. A scene at least 1100 pt wide (every full-screen landscape iPad)
+- **iPad sheets.** On iPad managed sheets stay native system sheets sized by `TronSheetDetentDriver`:
+  one detent at the measured content height (plus the keyboard's height above the bottom safe area),
+  or `.large`, changed through `UISheetPresentationController.animateChanges`; a nested sheet never
+  opens shorter than the sheet it covers (the driver floors a child at its presenter's applied
+  detent), so UIKit never tucks the parent. On iPadOS 27 `TronPadSheetMode` sets their geometry. A scene at least 1100 pt wide (every full-screen landscape iPad)
   shows a full-height 420 pt trailing column without dimming; the scene or route surface that
   presented it reflows beside it, so the chat keeps taking taps and text, and a sheet opened from
   the column stacks on it in the same column. A narrower scene (portrait, split, windowed) shows

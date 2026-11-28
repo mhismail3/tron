@@ -473,7 +473,7 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         XCTAssertTrue(frames.allSatisfy { abs($0.width / $0.height - start.width / start.height) <= 0.005 },
                       "\(name): the parent only scales as a card, never reflows\n\(log)")
         XCTAssertTrue(frames.allSatisfy { $0.minY <= start.minY + 0.5 }, "\(name): the parent is never tucked down under the nested sheet\n\(log)")
-        XCTAssertTrue(frames.allSatisfy { $0.minY >= min(start.minY, child.minY - 12) - 0.5 },
+        XCTAssertTrue(frames[..<keyboardFrom].allSatisfy { $0.minY >= min(start.minY, child.minY - 12) - 0.5 },
                       "\(name): the parent rises no further than its deck peek above the nested sheet\n\(log)")
         try await app.waitForTopSheetToSettle()
         XCTAssertEqual(rendered(parent).minY, start.minY, accuracy: 0.5, "\(name): closing the nested sheet restores its parent")
