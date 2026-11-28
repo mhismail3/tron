@@ -203,6 +203,47 @@ final class ContentFitSheetViewTests: ShuffledTestCase {
         }
     }
 
+    func testCoveredSheetGoesBlankAndItsContentReturnsWhenUncovered() async throws {
+        try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
+            try await app.activate("Open Settings")
+            try await app.until("Settings opens") { sheetChain(app).count == 1 }
+            try await app.waitForTopSheetToSettle()
+            let parent = sheetChain(app)[0]
+            let content = parent.view!
+            @MainActor func opacity(_ view: UIView) -> Float { (view.layer.presentation() ?? view.layer).opacity }
+            let scroll = try XCTUnwrap(mainScroll(app))
+            let offset = scroll.contentOffset
+            XCTAssertEqual(opacity(content), 1, accuracy: 0.01, "an uncovered sheet shows its content")
+            for close in ["swipe", "Done"] {
+                _ = try await revealed(app, "settings-link-Connections")
+                UIView.setAnimationsEnabled(true)
+                try await app.activate("settings-link-Connections")
+                try await app.until("Connections over Settings (\(close))") { sheetChain(app).count == 2 }
+                for _ in 0..<60 { await MountedFixture.nextFrame() }
+                let child = sheetChain(app)[1]
+                XCTAssertEqual(opacity(content), 0, accuracy: 0.01, "\(close): the covered sheet's content is hidden")
+                XCTAssertEqual(opacity(child.view), 1, accuracy: 0.01, "\(close): the front sheet shows its content")
+                XCTAssertEqual(content.superview.map(opacity) ?? 0, 1, accuracy: 0.01, "\(close): the covered card's glass band stays drawn")
+                XCTAssertTrue(content.window != nil && parent.view === content, "\(close): the covered sheet stays mounted, not torn down")
+                if close == "swipe" {
+                    let drag = try XCTUnwrap(HostedPresentationProbe.sheetDrag)
+                    drag(child, .began, 0, 0)
+                    drag(child, .changed, 40, 0)
+                    await MountedFixture.nextFrame()
+                    drag(child, .ended, 40, 1800)
+                } else {
+                    try await app.activate("Done")
+                }
+                try await app.until("\(close) closes Connections") { sheetChain(app).count == 1 }
+                for _ in 0..<60 { await MountedFixture.nextFrame() }
+                UIView.setAnimationsEnabled(false)
+                XCTAssertEqual(opacity(content), 1, accuracy: 0.01, "\(close): the uncovered sheet's content is back")
+                XCTAssertTrue(sheetChain(app).first === parent, "\(close): the same sheet returns")
+                XCTAssertEqual(scroll.contentOffset.y, offset.y, accuracy: 0.5, "\(close): the uncovered sheet keeps its scroll position")
+            }
+        }
+    }
+
     func testSwipeDownDismissesOnlyTheTopSheet() async throws {
         try await mounted(["-tron-settings-fixture", "-settings-nested", "-settings-expanded-review"]) { app in
             try await app.activate("Open Settings")
