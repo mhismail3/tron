@@ -108,7 +108,7 @@ export const toolDefinitionCompatibility = {
   renderShell: "renderer", prepareArguments: "pi-runtime", executionMode: "pi-runtime", execute: "pi-runtime",
   renderCall: "renderer", renderResult: "renderer", outputSchema: "pi-runtime", exposure: "pi-runtime",
   namespace: "pi-runtime", annotations: "pi-runtime", defaultActive: "pi-runtime", prepareLoadout: "pi-runtime",
-  reachesTools: "pi-runtime",
+  reachesTools: "pi-runtime", settleAborted: "pi-runtime",
 } satisfies Record<keyof ToolDefinition, "pi-runtime" | "renderer">;
 
 export const remoteTuiFeasibilityCompatibility = {

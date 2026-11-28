@@ -190,6 +190,7 @@ struct ChatView: View {
         }
         .background { TronBackdrop().ignoresSafeArea(.all) }
         .environment(\.canonicalResourceSessionID, sessionID)
+        .environment(\.chatProviders, providers)
         .environment(\.chatAnnotationPresenter, annotationPresenter)
         .onChange(of: composerScope, initial: true) { _, scope in
             annotationPresenter.bind(drafts: model.composerDrafts, scope: scope)
@@ -1201,6 +1202,11 @@ struct ChatView: View {
 
     private var topBlur: some View {
         TronTopBlurOverlay(style: .chat)
+    }
+
+    private var providers: [String: ProviderSummary] {
+        let catalog = model.providerCatalog(for: .session(id: sessionID)) ?? model.providerCatalog(for: .global)
+        return Dictionary((catalog?.providers ?? []).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     private var transcript: some View {
